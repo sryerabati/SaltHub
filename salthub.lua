@@ -4977,10 +4977,8 @@ function Feature.getMergeCandidates(selected)
             continue
         end
         if unit and not unit.locked and not textMatchesAny(unit.name, Config.merge.blacklist) then
-            if selectedKey ~= "" or not Feature.shouldKeepMergeUnit(unit) then
-                if Feature.getShapeFootprint(unit.name) then
-                    table.insert(candidates, unit)
-                end
+            if Feature.getShapeFootprint(unit.name) then
+                table.insert(candidates, unit)
             end
         end
     end

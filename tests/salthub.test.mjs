@@ -730,6 +730,17 @@ test("auto merge skips duplicate groups without placement shapes", () => {
   assert.match(getMergeCandidates, /if Feature\.getShapeFootprint\(unit\.name\) then/);
 });
 
+test("auto merge includes duplicate target mutations instead of preserving every rolled target", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const getMergeCandidates = source.match(/function Feature\.getMergeCandidates\(selected\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const mergeFamilyKey = source.match(/function Feature\.mergeFamilyKey\(unit\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(mergeFamilyKey, /Feature\.mergeMutationKey\(unit and unit\.mutation\)/);
+  assert.doesNotMatch(getMergeCandidates, /Feature\.shouldKeepMergeUnit\(unit\)/);
+  assert.doesNotMatch(getMergeCandidates, /Config\.roll\.unitMutationTargets/);
+  assert.doesNotMatch(getMergeCandidates, /Config\.roll\.targetMutations/);
+});
+
 test("merge placement scans for a cell where the selected shape actually fits", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const findMergePlacementCell = source.match(/function Feature\.findMergePlacementCell\(unit, preferredCell\)([\s\S]*?)\nend/)?.[1] ?? "";
