@@ -850,15 +850,22 @@ test("selected merge target is an explicit button action that preserves the best
 
 test("settings export copies a reusable launch script with embedded preset", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const getSerializableConfig = source.match(/function Feature\.getSerializableConfig\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const exportLaunchScript = source.match(/function Feature\.exportLaunchScript\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
+  assert.match(source, /local LAUNCH_SCRIPT_URL = "https:\/\/raw\.githubusercontent\.com\/sryerabati\/SaltHub\/main\/salthub\.lua"/);
   assert.match(source, /export = \{/);
-  assert.match(source, /scriptUrl = "https:\/\/raw\.githubusercontent\.com\/sryerabati\/SaltHub\/main\/salthub\.lua"/);
+  assert.match(source, /scriptUrl = LAUNCH_SCRIPT_URL/);
   assert.match(source, /function mergeConfig/);
   assert.match(source, /function applyPresetFromGlobal/);
   assert.match(source, /SaltHubPreset/);
+  assert.match(source, /function Feature\.getLaunchScriptUrl/);
   assert.match(source, /function Feature\.getSerializableConfig/);
+  assert.match(getSerializableConfig, /serialized\.export\.scriptUrl = Feature\.getLaunchScriptUrl\(\)/);
   assert.match(source, /function Feature\.exportLaunchScript/);
   assert.match(source, /getgenv\(\)\.SaltHubPreset/);
+  assert.match(exportLaunchScript, /Feature\.getLaunchScriptUrl\(\)/);
+  assert.doesNotMatch(exportLaunchScript, /tostring\(Config\.export\.scriptUrl\)/);
   assert.match(source, /loadstring\(game:HttpGet\(Config\.export\.scriptUrl\)\)\(\)/);
   assert.match(source, /setclipboard\(scriptText\)/);
   assert.match(source, /"Copy Launch Script"/);

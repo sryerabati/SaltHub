@@ -19,6 +19,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Assets = ReplicatedStorage:FindFirstChild("Assets")
 local tableUnpack = table.unpack or unpack
+local LAUNCH_SCRIPT_URL = "https://raw.githubusercontent.com/sryerabati/SaltHub/main/salthub.lua"
 
 local EXISTING = getgenv and getgenv().SaltHub
 if EXISTING and EXISTING.Destroy then
@@ -37,7 +38,7 @@ local Config = {
         notifications = true,
     },
     export = {
-        scriptUrl = "https://raw.githubusercontent.com/sryerabati/SaltHub/main/salthub.lua",
+        scriptUrl = LAUNCH_SCRIPT_URL,
     },
     safety = {
         remoteCooldown = 0.35,
@@ -6276,8 +6277,15 @@ function Feature.serializeConfigValue(value)
     return value
 end
 
+function Feature.getLaunchScriptUrl()
+    return LAUNCH_SCRIPT_URL
+end
+
 function Feature.getSerializableConfig()
-    return Feature.serializeConfigValue(Config)
+    local serialized = Feature.serializeConfigValue(Config)
+    serialized.export = serialized.export or {}
+    serialized.export.scriptUrl = Feature.getLaunchScriptUrl()
+    return serialized
 end
 
 function Feature.exportLaunchScript()
@@ -6290,7 +6298,7 @@ function Feature.exportLaunchScript()
     end
 
     local scriptText = "getgenv().SaltHubPreset = [===[" .. encoded .. "]===]\n"
-        .. "local Config = { export = { scriptUrl = \"" .. tostring(Config.export.scriptUrl) .. "\" } }\n"
+        .. "local Config = { export = { scriptUrl = \"" .. tostring(Feature.getLaunchScriptUrl()) .. "\" } }\n"
         .. "loadstring(game:HttpGet(Config.export.scriptUrl))()"
 
     Log.push(scriptText)
