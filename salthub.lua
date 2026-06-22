@@ -37,7 +37,7 @@ local Config = {
         notifications = true,
     },
     export = {
-        scriptUrl = "http://127.0.0.1:16500/salthub.lua",
+        scriptUrl = "https://raw.githubusercontent.com/sryerabati/SaltHub/main/salthub.lua",
     },
     safety = {
         remoteCooldown = 0.35,
@@ -50,6 +50,7 @@ local Config = {
         buyPause = 0.9,
         moveTimeout = 1.35,
         merge = 0.8,
+        mergeIdle = 2.5,
         trait = 0.75,
         upgrade = 0.7,
         event = 1.0,
@@ -518,6 +519,8 @@ local State = {
     pityText = "-",
     rolledCharacters = {},
     pendingMerge = nil,
+    autoMergeIgnoredCharacters = {},
+    autoMergeIdleUntil = 0,
     battlepassStatus = "Waiting for data.",
     waveStatus = "-",
     lastWaveStartAt = 0,
@@ -1099,6 +1102,22 @@ local function upsertUnit(units, byId, unit)
     table.insert(units, unit)
 end
 
+local function isPlacedUnitModel(model, containerName)
+    if not model or not model:IsA("Model") then
+        return false
+    end
+    if containerName == "Fighters" or containerName == "PlacedCharacters" then
+        return true
+    end
+    if readAttr(model, { "IsPlacedCharacter" }, false) == true then
+        return true
+    end
+    if tostring(readAttr(model, { "Cells" }, "")) ~= "" then
+        return true
+    end
+    return false
+end
+
 function State.scanUnits()
     local units = {}
     local byId = {}
@@ -1160,7 +1179,7 @@ function State.scanUnits()
             if folder then
                 for _, model in ipairs(folder:GetChildren()) do
                     local id = tostring(readAttr(model, { "CharacterId", "CharacterID", "UID", "Uuid", "UUID", "Id", "ID" }, ""))
-                    if id ~= "" and model.Name ~= "" then
+                    if id ~= "" and model.Name ~= "" and isPlacedUnitModel(model, containerName) then
                         local existing = byId[id]
                         upsertUnit(units, byId, {
                             instance = model,
@@ -3996,8 +4015,11 @@ function Feature.getShapeFootprint(unitName)
     local cellSizeX = math.max(main.Size.X, 1)
     local cellSizeZ = math.max(main.Size.Z, 1)
     local offsets = {}
+    local partOffsets = {}
     local seen = {}
+    local shapePivot = shapeModel:GetPivot()
     for _, part in ipairs(parts) do
+        table.insert(partOffsets, shapePivot:ToObjectSpace(part.CFrame))
         local dx = math.floor((part.Position.X - main.Position.X) / cellSizeX + 0.5)
         local dz = math.floor((part.Position.Z - main.Position.Z) / cellSizeZ + 0.5)
         local key = tostring(dx) .. ":" .. tostring(dz)
@@ -4015,6 +4037,7 @@ function Feature.getShapeFootprint(unitName)
         shapeModel = shapeModel,
         spots = math.max(#offsets, 1),
         offsets = offsets,
+        partOffsets = partOffsets,
         pivotOffset = main.CFrame:ToObjectSpace(shapeModel:GetPivot()),
         cellSizeX = cellSizeX,
         cellSizeZ = cellSizeZ,
@@ -4067,6 +4090,22 @@ function Feature.getContainingGridCell(part, gridMap)
     return nil
 end
 
+function Feature.getContainingGridCellForPosition(position, gridMap)
+    if not position then
+        return nil
+    end
+    for _, cell in pairs(gridMap or {}) do
+        if cell:IsA("BasePart") then
+            local dx = math.abs(position.X - cell.Position.X)
+            local dz = math.abs(position.Z - cell.Position.Z)
+            if dx <= cell.Size.X * 0.5 + 0.1 and dz <= cell.Size.Z * 0.5 + 0.1 then
+                return cell
+            end
+        end
+    end
+    return nil
+end
+
 function Feature.getShapeOccupiedCellNames(footprint, anchorCell, gridMap, cells)
     if not footprint or not footprint.shapeModel or not anchorCell then
         return nil
@@ -4074,10 +4113,16 @@ function Feature.getShapeOccupiedCellNames(footprint, anchorCell, gridMap, cells
 
     local placementConfig = State.placementConfig or {}
     local yOffset = tonumber(placementConfig.YOffset) or 0
+    local shapeCFrame = (anchorCell.CFrame + Vector3.new(0, yOffset, 0)) * (footprint.pivotOffset or CFrame.new())
     local occupied = {}
     local seen = {}
-    for _, offset in ipairs(footprint.offsets or { { dx = 0, dz = 0 } }) do
-        local cell = Feature.getCellByOffset(anchorCell, offset, cells)
+    local partOffsets = footprint.partOffsets
+    if type(partOffsets) ~= "table" or #partOffsets == 0 then
+        return nil
+    end
+    for _, partOffset in ipairs(partOffsets) do
+        local partCFrame = shapeCFrame * partOffset
+        local cell = Feature.getContainingGridCellForPosition(partCFrame.Position, gridMap)
         if not cell or seen[cell.Name] then
             return nil
         end
@@ -4088,7 +4133,6 @@ function Feature.getShapeOccupiedCellNames(footprint, anchorCell, gridMap, cells
     if #occupied == 0 then
         return nil
     end
-    local shapeCFrame = (anchorCell.CFrame + Vector3.new(0, yOffset, 0)) * (footprint.pivotOffset or CFrame.new())
     return occupied, shapeCFrame
 end
 
@@ -4743,7 +4787,7 @@ function Feature.findPlacedUnitModel(unit)
         local folder = plot:FindFirstChild(containerName)
         if folder then
             for _, model in ipairs(folder:GetChildren()) do
-                if Feature.unitIdMatchesInstance(unit, model) then
+                if isPlacedUnitModel(model, containerName) and Feature.unitIdMatchesInstance(unit, model) then
                     return model
                 end
             end
@@ -4757,7 +4801,7 @@ function Feature.findPlacedUnitModel(unit)
         local folder = plot:FindFirstChild(containerName)
         if folder then
             for _, model in ipairs(folder:GetChildren()) do
-                if model.Name == unit.name then
+                if isPlacedUnitModel(model, containerName) and model.Name == unit.name then
                     return model
                 end
             end
@@ -5066,6 +5110,158 @@ function Feature.getDuplicateMergePlan(selectedOnly, ignoredKeys)
         return nil
     end
     return nil
+end
+
+function Feature.getDuplicateMergePlanForFamily(familyKey, ignoredKeys)
+    local targetFamilyKey = tostring(familyKey or "")
+    if targetFamilyKey == "" then
+        return nil
+    end
+
+    State.scanUnits()
+    local groups = {}
+    for _, unit in ipairs(Feature.getMergeCandidates(nil)) do
+        if Feature.mergeFamilyKey(unit) == targetFamilyKey then
+            local key = Feature.mergeKey(unit)
+            groups[key] = groups[key] or {}
+            table.insert(groups[key], unit)
+        end
+    end
+
+    local candidateGroups = {}
+    for key, group in pairs(groups) do
+        if not (ignoredKeys and ignoredKeys[key]) and #group >= 2 then
+            table.insert(candidateGroups, group)
+        end
+    end
+    table.sort(candidateGroups, function(a, b)
+        local levelA = Feature.unitMergeLevel(a[1])
+        local levelB = Feature.unitMergeLevel(b[1])
+        if levelA ~= levelB then
+            return levelA < levelB
+        end
+        if #a ~= #b then
+            return #a > #b
+        end
+        return Feature.traitScore(a[1]) > Feature.traitScore(b[1])
+    end)
+
+    for _, bestGroup in ipairs(candidateGroups) do
+        table.sort(bestGroup, function(a, b)
+            local scoreA = Feature.traitScore(a)
+            local scoreB = Feature.traitScore(b)
+            if scoreA ~= scoreB then
+                return scoreA > scoreB
+            end
+            return tostring(a.id) < tostring(b.id)
+        end)
+
+        local cell = Feature.getMergeAnchorCell(bestGroup[1], bestGroup)
+        cell = Feature.findMergePlacementCell(bestGroup[1], cell)
+        if cell then
+            return {
+                target = bestGroup[1],
+                units = Feature.orderMergeUnits(bestGroup, bestGroup[1]),
+                cell = cell,
+                key = Feature.mergeKey(bestGroup[1]),
+                familyKey = targetFamilyKey,
+            }
+        end
+    end
+
+    return nil
+end
+
+function Feature.findNextAutoMergeFamily(characterName, ignoredFamilies, ignoredCharacters)
+    State.scanUnits()
+    local targetCharacter = normalizeText(characterName)
+    local families = {}
+    local order = {}
+
+    for _, unit in ipairs(Feature.getMergeCandidates(nil)) do
+        local unitCharacter = normalizeText(unit.name)
+        if (targetCharacter == "" or unitCharacter == targetCharacter)
+            and not (targetCharacter == "" and ignoredCharacters and ignoredCharacters[unitCharacter])
+        then
+            local familyKey = Feature.mergeFamilyKey(unit)
+            if familyKey ~= "" and not (ignoredFamilies and ignoredFamilies[familyKey]) then
+                local family = families[familyKey]
+                if not family then
+                    family = {
+                        familyKey = familyKey,
+                        characterName = unitCharacter,
+                        displayName = tostring(unit.name or ""),
+                        mutationKey = Feature.mergeMutationKey(unit.mutation),
+                        count = 0,
+                        mergeKeys = {},
+                    }
+                    families[familyKey] = family
+                    table.insert(order, family)
+                end
+                family.count += 1
+                local mergeKey = Feature.mergeKey(unit)
+                family.mergeKeys[mergeKey] = (family.mergeKeys[mergeKey] or 0) + 1
+            end
+        end
+    end
+
+    local mergeable = {}
+    for _, family in ipairs(order) do
+        for _, count in pairs(family.mergeKeys) do
+            if count >= 2 then
+                table.insert(mergeable, family)
+                break
+            end
+        end
+    end
+
+    table.sort(mergeable, function(a, b)
+        if a.characterName ~= b.characterName then
+            return a.characterName < b.characterName
+        end
+        if a.mutationKey ~= b.mutationKey then
+            return a.mutationKey < b.mutationKey
+        end
+        return a.familyKey < b.familyKey
+    end)
+
+    return mergeable[1]
+end
+
+function Feature.resetAutoMergePending()
+    State.pendingMerge = {
+        mode = "auto",
+        characterName = "",
+        displayName = "",
+        familyKey = "",
+        ignoredFamilies = {},
+        ignoredKeys = {},
+    }
+    return State.pendingMerge
+end
+
+function Feature.pickupAutoMergeBoardUnits(characterName)
+    State.scanUnits()
+    local targetCharacter = normalizeText(characterName)
+    local picked = 0
+    for _, unit in ipairs(State.characters) do
+        if unit
+            and unit.placed == true
+            and normalizeText(unit.name) == targetCharacter
+            and not unit.locked
+            and not textMatchesAny(unit.name, Config.merge.blacklist)
+            and Feature.getShapeFootprint(unit.name)
+        then
+            if Feature.pickupUnitForMerge(unit) then
+                picked += 1
+            end
+        end
+    end
+    if picked > 0 then
+        State.scanUnits()
+        Log.push("Auto merge picked up " .. tostring(picked) .. " placed " .. tostring(characterName) .. " unit(s).")
+    end
+    return picked
 end
 
 function Feature.findFreeGridCell()
@@ -5399,21 +5595,59 @@ function Feature.executeMergePlan(plan)
 end
 
 function Feature.autoMergeStep()
-    local ignoredKeys = {}
-    for _ = 1, 12 do
-        local plan = Feature.getDuplicateMergePlan(false, ignoredKeys)
-        if not plan then
-            Log.push("No mergeable duplicate pair found.")
-            return false
-        end
-
-        if Feature.executeTargetMergeCascade(plan.target) then
-            return true
-        end
-        ignoredKeys[plan.key] = true
+    local now = os.clock()
+    if now < (State.autoMergeIdleUntil or 0) then
+        return false
     end
 
-    Log.push("No mergeable duplicate pair succeeded.")
+    local pending = State.pendingMerge
+    if type(pending) ~= "table" or pending.mode ~= "auto" then
+        pending = Feature.resetAutoMergePending()
+    end
+
+    if tostring(pending.characterName or "") == "" then
+        local family = Feature.findNextAutoMergeFamily(nil, nil, State.autoMergeIgnoredCharacters)
+        if not family then
+            State.autoMergeIgnoredCharacters = {}
+            State.autoMergeIdleUntil = now + (tonumber(Config.delays.mergeIdle) or 2.5)
+            return false
+        end
+        pending.characterName = family.characterName
+        pending.displayName = family.displayName
+        pending.familyKey = family.familyKey
+        pending.ignoredFamilies = {}
+        pending.ignoredKeys = {}
+        Log.push("Auto merge focusing " .. tostring(family.displayName) .. ".")
+    end
+
+    if tostring(pending.familyKey or "") == "" then
+        local family = Feature.findNextAutoMergeFamily(pending.characterName, pending.ignoredFamilies)
+        if not family then
+            Feature.pickupAutoMergeBoardUnits(pending.characterName)
+            Log.push("Auto merge finished " .. tostring(pending.displayName ~= "" and pending.displayName or pending.characterName) .. ".")
+            State.autoMergeIgnoredCharacters[pending.characterName] = true
+            State.pendingMerge = nil
+            return false
+        end
+        pending.displayName = family.displayName
+        pending.familyKey = family.familyKey
+        pending.ignoredKeys = {}
+        Log.push("Auto merge moving to " .. tostring(family.displayName) .. " mutation " .. tostring(family.mutationKey) .. ".")
+    end
+
+    local plan = Feature.getDuplicateMergePlanForFamily(pending.familyKey, pending.ignoredKeys)
+    if not plan then
+        pending.ignoredFamilies[pending.familyKey] = true
+        pending.familyKey = ""
+        pending.ignoredKeys = {}
+        return false
+    end
+
+    if Feature.executeTargetMergeCascade(plan.target) then
+        return true
+    end
+
+    pending.ignoredKeys[plan.key] = true
     return false
 end
 
@@ -5429,12 +5663,21 @@ end
 function Feature.toggleAutoMerge(value)
     Config.flags.autoMerge = value
     if value then
+        State.pendingMerge = nil
+        State.autoMergeIgnoredCharacters = {}
+        State.autoMergeIdleUntil = 0
         Feature.startLoop("autoMerge", function()
+            local idleUntil = State.autoMergeIdleUntil or 0
+            if idleUntil > os.clock() then
+                return math.max(idleUntil - os.clock(), Config.delays.merge)
+            end
             return Config.delays.merge
         end, Feature.autoMergeStep)
     else
         Feature.stopLoop("autoMerge")
         State.pendingMerge = nil
+        State.autoMergeIgnoredCharacters = {}
+        State.autoMergeIdleUntil = 0
     end
 end
 

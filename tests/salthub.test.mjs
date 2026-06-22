@@ -595,10 +595,10 @@ test("auto merge places the best trait unit first so its trait is preserved", ()
 
   const mergeStepBody = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(source, /function Feature\.executeMergePlan/);
-  assert.match(mergeStepBody, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
+  assert.match(mergeStepBody, /Feature\.getDuplicateMergePlanForFamily\(pending\.familyKey, pending\.ignoredKeys\)/);
   assert.match(mergeStepBody, /Feature\.executeTargetMergeCascade\(plan\.target\)/);
   assert.doesNotMatch(mergeStepBody, /Feature\.executeMergePlan\(plan\)/);
-  assert.doesNotMatch(mergeStepBody, /pendingMerge/);
+  assert.match(mergeStepBody, /State\.pendingMerge/);
   const executeBody = source.match(/function Feature\.executeMergePlan\(plan\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(executeBody, /Feature\.pickupMergeGroup\(plan\.units\)/);
   assert.match(executeBody, /Feature\.placeUnitForMerge\(plan\.target, plan\.cell\)/);
@@ -643,7 +643,8 @@ test("merge only falls back to same-name placed models when no unit id is known"
   const findPlacedUnitModel = source.match(/function Feature\.findPlacedUnitModel\(unit\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(findPlacedUnitModel, /for _, containerName in ipairs\(\{ "Characters", "Fighters", "PlacedCharacters", "Builds" \}\) do/);
-  assert.match(findPlacedUnitModel, /Feature\.unitIdMatchesInstance\(unit, model\)/);
+  assert.match(findPlacedUnitModel, /isPlacedUnitModel\(model, containerName\) and Feature\.unitIdMatchesInstance\(unit, model\)/);
+  assert.match(findPlacedUnitModel, /isPlacedUnitModel\(model, containerName\) and model\.Name == unit\.name/);
   assert.match(findPlacedUnitModel, /if tostring\(unit\.id or ""\) ~= "" then\s+return nil\s+end/);
 });
 
@@ -661,8 +662,19 @@ test("unit scanning includes placed fighters for merge planning", () => {
   const scanUnits = source.match(/function State\.scanUnits\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(scanUnits, /for _, containerName in ipairs\(\{ "Characters", "Fighters", "PlacedCharacters", "Builds" \}\) do/);
+  assert.match(scanUnits, /isPlacedUnitModel\(model, containerName\)/);
   assert.match(scanUnits, /placed = true/);
   assert.match(scanUnits, /instance = model/);
+});
+
+test("unit scanning ignores roll display characters that are not placed fighters", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /local function isPlacedUnitModel\(model, containerName\)/);
+  assert.match(source, /containerName == "Fighters" or containerName == "PlacedCharacters"/);
+  assert.match(source, /readAttr\(model, \{ "IsPlacedCharacter" \}, false\) == true/);
+  assert.match(source, /tostring\(readAttr\(model, \{ "Cells" \}, ""\)\) ~= ""/);
+  assert.match(source, /id ~= "" and model\.Name ~= "" and isPlacedUnitModel\(model, containerName\)/);
 });
 
 test("placed fighter scanning preserves known mutation when the model omits it", () => {
@@ -734,6 +746,19 @@ test("merge placement scans for a cell where the selected shape actually fits", 
   assert.match(executeTargetMergeCascade, /targetCell = Feature\.findMergePlacementCell\(target, targetCell\)/);
 });
 
+test("merge placement validates snapped shape parts against real grid cells", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const getShapeFootprint = source.match(/function Feature\.getShapeFootprint\(unitName\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const getShapeOccupiedCellNames = source.match(/function Feature\.getShapeOccupiedCellNames\(footprint, anchorCell, gridMap, cells\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.getContainingGridCellForPosition\(position, gridMap\)/);
+  assert.match(getShapeFootprint, /partOffsets = partOffsets/);
+  assert.match(getShapeFootprint, /shapePivot:ToObjectSpace\(part\.CFrame\)/);
+  assert.match(getShapeOccupiedCellNames, /shapeCFrame \* partOffset/);
+  assert.match(getShapeOccupiedCellNames, /Feature\.getContainingGridCellForPosition\(partCFrame\.Position, gridMap\)/);
+  assert.doesNotMatch(getShapeOccupiedCellNames, /Feature\.getCellByOffset\(anchorCell, offset, cells\)/);
+});
+
 test("selected merge target picker excludes unknown-level placed ghosts", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const isMergeSelectableTarget = source.match(/function Feature\.isMergeSelectableTarget\(unit\)([\s\S]*?)\nend/)?.[1] ?? "";
@@ -751,9 +776,48 @@ test("auto merge retries another duplicate group after an unplaceable group fail
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(source, /function Feature\.getDuplicateMergePlan\(selectedOnly, ignoredKeys\)/);
-  assert.match(autoMergeStep, /local ignoredKeys = \{\}/);
-  assert.match(autoMergeStep, /ignoredKeys\[plan\.key\] = true/);
-  assert.match(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
+  assert.match(source, /function Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
+  assert.match(autoMergeStep, /pending\.ignoredKeys\[plan\.key\] = true/);
+  assert.match(autoMergeStep, /Feature\.getDuplicateMergePlanForFamily\(pending\.familyKey, pending\.ignoredKeys\)/);
+  assert.doesNotMatch(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
+});
+
+test("auto merge finishes a character family sweep before choosing another character", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.findNextAutoMergeFamily\(characterName, ignoredFamilies, ignoredCharacters\)/);
+  assert.match(source, /function Feature\.resetAutoMergePending\(\)/);
+  assert.match(autoMergeStep, /pending\.characterName/);
+  assert.match(autoMergeStep, /pending\.familyKey/);
+  assert.match(autoMergeStep, /Feature\.findNextAutoMergeFamily\(pending\.characterName, pending\.ignoredFamilies\)/);
+  assert.match(autoMergeStep, /pending\.ignoredFamilies\[pending\.familyKey\] = true/);
+  assert.match(autoMergeStep, /Feature\.pickupAutoMergeBoardUnits\(pending\.characterName\)/);
+});
+
+test("auto merge does not immediately reselect a completed character in the same sweep", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const toggleAutoMerge = source.match(/function Feature\.toggleAutoMerge\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /autoMergeIgnoredCharacters = \{\}/);
+  assert.match(source, /function Feature\.findNextAutoMergeFamily\(characterName, ignoredFamilies, ignoredCharacters\)/);
+  assert.match(autoMergeStep, /Feature\.findNextAutoMergeFamily\(nil, nil, State\.autoMergeIgnoredCharacters\)/);
+  assert.match(autoMergeStep, /State\.autoMergeIgnoredCharacters\[pending\.characterName\] = true/);
+  assert.match(autoMergeStep, /State\.autoMergeIgnoredCharacters = \{\}/);
+  assert.match(toggleAutoMerge, /State\.autoMergeIgnoredCharacters = \{\}/);
+});
+
+test("auto merge backs off when idle instead of rescanning every merge tick", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const toggleAutoMerge = source.match(/function Feature\.toggleAutoMerge\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /mergeIdle = 2\.5/);
+  assert.match(source, /autoMergeIdleUntil = 0/);
+  assert.match(autoMergeStep, /if now < \(State\.autoMergeIdleUntil or 0\) then/);
+  assert.match(autoMergeStep, /State\.autoMergeIdleUntil = now \+ \(tonumber\(Config\.delays\.mergeIdle\) or 2\.5\)/);
+  assert.match(toggleAutoMerge, /State\.autoMergeIdleUntil = 0/);
 });
 
 test("selected merge target is an explicit button action that preserves the best trait duplicate", () => {
@@ -788,7 +852,7 @@ test("settings export copies a reusable launch script with embedded preset", () 
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /export = \{/);
-  assert.match(source, /scriptUrl = "http:\/\/127\.0\.0\.1:16500\/salthub\.lua"/);
+  assert.match(source, /scriptUrl = "https:\/\/raw\.githubusercontent\.com\/sryerabati\/SaltHub\/main\/salthub\.lua"/);
   assert.match(source, /function mergeConfig/);
   assert.match(source, /function applyPresetFromGlobal/);
   assert.match(source, /SaltHubPreset/);

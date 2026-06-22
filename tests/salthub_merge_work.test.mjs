@@ -100,9 +100,31 @@ test("auto merge retries the next duplicate group when one group cannot be place
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)[\s\S]*?\nend/)?.[0] ?? "";
 
   assert.match(source, /function Feature\.getDuplicateMergePlan\(selectedOnly, ignoredKeys\)/);
-  assert.match(autoMergeStep, /local ignoredKeys = \{\}/);
-  assert.match(autoMergeStep, /ignoredKeys\[plan\.key\] = true/);
-  assert.match(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
+  assert.match(source, /function Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
+  assert.match(autoMergeStep, /pending\.ignoredKeys\[plan\.key\] = true/);
+  assert.match(autoMergeStep, /Feature\.getDuplicateMergePlanForFamily\(pending\.familyKey, pending\.ignoredKeys\)/);
+  assert.doesNotMatch(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
+});
+
+test("auto merge keeps one character active until its mutation families are exhausted", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)[\s\S]*?\nend/)?.[0] ?? "";
+
+  assert.match(source, /function Feature\.findNextAutoMergeFamily\(characterName, ignoredFamilies, ignoredCharacters\)/);
+  assert.match(autoMergeStep, /pending\.characterName/);
+  assert.match(autoMergeStep, /pending\.familyKey/);
+  assert.match(autoMergeStep, /Feature\.findNextAutoMergeFamily\(pending\.characterName, pending\.ignoredFamilies\)/);
+  assert.match(autoMergeStep, /Feature\.pickupAutoMergeBoardUnits\(pending\.characterName\)/);
+});
+
+test("auto merge has an idle backoff to avoid repeated heavy rescans", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)[\s\S]*?\nend/)?.[0] ?? "";
+
+  assert.match(source, /mergeIdle = 2\.5/);
+  assert.match(source, /autoMergeIdleUntil = 0/);
+  assert.match(autoMergeStep, /State\.autoMergeIdleUntil/);
+  assert.match(autoMergeStep, /Config\.delays\.mergeIdle/);
 });
 
 test("merge placement scans beyond the first free cell for shapes that need neighbors", () => {
@@ -146,6 +168,7 @@ test("placed model lookup does not pick up a same-name model when the unit id is
   const findPlacedUnitModel = source.match(/function Feature\.findPlacedUnitModel\(unit\)[\s\S]*?\nend/)?.[0] ?? "";
 
   assert.match(findPlacedUnitModel, /for _, containerName in ipairs\(\{ "Characters", "Fighters", "PlacedCharacters", "Builds" \}\) do/);
+  assert.match(findPlacedUnitModel, /isPlacedUnitModel\(model, containerName\) and Feature\.unitIdMatchesInstance\(unit, model\)/);
   assert.match(findPlacedUnitModel, /if tostring\(unit\.id or ""\) ~= "" then\s+return nil\s+end/);
 });
 
@@ -163,6 +186,7 @@ test("unit scanning includes placed fighters so auto merge can continue from boa
   const scanUnits = source.match(/function State\.scanUnits\(\)[\s\S]*?\nend/)?.[0] ?? "";
 
   assert.match(scanUnits, /for _, containerName in ipairs\(\{ "Characters", "Fighters", "PlacedCharacters", "Builds" \}\) do/);
+  assert.match(scanUnits, /isPlacedUnitModel\(model, containerName\)/);
   assert.match(scanUnits, /placed = true/);
   assert.match(scanUnits, /instance = model/);
 });
