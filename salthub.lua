@@ -4559,7 +4559,7 @@ function Feature.placeBestLineup()
 
     local placed = 0
     for _, item in ipairs(plan) do
-        local ok = Feature.placeUnitForMerge(item.unit, item.placement.cell)
+        local ok = Feature.equipUnitForPlacement(item.unit) and Feature.placeCharacterAndWait(item)
         if ok then
             placed += 1
         end

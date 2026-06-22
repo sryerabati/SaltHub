@@ -570,7 +570,10 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.placeBestLineup/);
   assert.match(source, /remote\.OnClientEvent:Connect/);
   assert.match(source, /Feature\.pickupBestLineupUnits\(\)/);
-  assert.match(source, /Feature\.placeUnitForMerge\(item\.unit, item\.placement\.cell\)/);
+  assert.match(source, /Feature\.equipUnitForPlacement\(item\.unit\)/);
+  assert.match(source, /Feature\.placeCharacterAndWait\(item\)/);
+  const placeBestBody = source.match(/function Feature\.placeBestLineup\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.doesNotMatch(placeBestBody, /Feature\.placeUnitForMerge/);
   assert.match(source, /ShapeName = item\.placement\.shapeName/);
   assert.match(source, /HoveredCellName = item\.placement\.hoveredCellName/);
   assert.match(source, /ShapeCFrame = item\.placement\.shapeCFrame/);
