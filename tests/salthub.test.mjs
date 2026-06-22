@@ -541,6 +541,9 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /candidateLimit = 64/);
   assert.match(source, /dpsCandidateLimit = 48/);
   assert.match(source, /densityCandidateLimit = 32/);
+  assert.match(source, /fillCandidateLimit = 256/);
+  assert.match(source, /replacementPasses = 4/);
+  assert.match(source, /minReplacementGain = 0\.01/);
   assert.match(source, /CharacterLevelInfo/);
   assert.match(source, /CharacterLevelHelper/);
   assert.match(source, /CharacterStatsUiHelper/);
@@ -551,6 +554,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.getCharacterStaticInfo/);
   assert.match(source, /function Feature\.getMutationInfo/);
   assert.match(source, /function Feature\.getTraitInfo/);
+  assert.match(source, /function Feature\.makeUnitStatModel/);
   assert.match(source, /function Feature\.computeUnitDerivedStats/);
   assert.match(source, /function Feature\.getCurrentGridModel/);
   assert.match(source, /Feature\.dataGet\("GridLevel"/);
@@ -561,6 +565,10 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.scoreLineupUnit/);
   assert.match(source, /function Feature\.findBestLineupPlacement/);
   assert.match(source, /function Feature\.ensureBestLineupData/);
+  assert.match(source, /function Feature\.getBestLineupFillCandidates/);
+  assert.match(source, /function Feature\.scoreBestLineupPlan/);
+  assert.match(source, /function Feature\.fillBestLineupPlan/);
+  assert.match(source, /function Feature\.improveBestLineupPlan/);
   assert.match(source, /function Feature\.buildBestLineupBeamPlan/);
   assert.match(source, /function Feature\.buildBestLineupCandidates/);
   assert.match(source, /function Feature\.prepareBestLineupCandidatePlacements/);
@@ -580,12 +588,17 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /offsets = offsets/);
   assert.match(source, /Feature\.getCellByOffset/);
   assert.match(source, /1 \/ math\.max\(derived\.cooldown/);
+  assert.match(source, /State\.characterStatsUiHelper[\s\S]*GetDps/);
+  assert.match(source, /helper\.GetDps\(unit\.name, statModel, info, unit\.mutation, traitInfo\)/);
   assert.doesNotMatch(source, /- derived\.cooldown \* \(tonumber\(Config\.bestLineup\.cooldownWeight\)/);
   assert.match(source, /derived\.dps > b\.derived\.dps/);
   assert.match(source, /candidate\.placementOptions/);
   const planBody = source.match(/function Feature\.getBestLineupPlan\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(planBody, /State\.loadSharedInfo\(\)/);
   assert.match(planBody, /Feature\.ensureBestLineupData\(\)/);
+  assert.match(source, /Feature\.buildBestLineupBeamPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates\)/);
+  assert.match(source, /Feature\.buildBestLineupBeamPlan\(candidates, cells, gridMap, \{\}, fillCandidates\)/);
+  assert.match(source, /Feature\.improveBestLineupPlan\(plan, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy\)/);
   assert.match(source, /"Place Best Lineup"/);
   assert.doesNotMatch(source, /function Feature\.placeBestLineup[\s\S]*?Remote\.fire\("AutoMergeToggle"/);
 });
