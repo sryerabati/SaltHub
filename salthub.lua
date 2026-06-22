@@ -3007,6 +3007,22 @@ function Feature.teleportToInstance(instance)
     return ok
 end
 
+function Feature.teleportToCFrame(targetCFrame)
+    local root = Feature.getCharacterRoot()
+    if not root or not targetCFrame then
+        Log.push("Teleport target was not found.")
+        return false
+    end
+
+    local ok, err = pcall(function()
+        root.CFrame = targetCFrame
+    end)
+    if not ok then
+        Log.push("Teleport failed: " .. tostring(err))
+    end
+    return ok
+end
+
 function Feature.holdKey(keyCode, duration)
     local key = keyCode or Enum.KeyCode.E
     local seconds = math.max(tonumber(duration) or 0.15, 0.15)
@@ -5649,14 +5665,14 @@ function Feature.collectBuharaFood(drop)
         return false
     end
 
-    Feature.moveNearInstance(drop.instance, Config.buhara.foodCollectDistance, false)
+    Feature.teleportToInstance(drop.instance)
     task.wait(0.05)
     if drop.prompt then
         Feature.holdPrompt(drop.prompt)
     else
         local part = Feature.getTargetPart(drop.instance)
         if part then
-            Feature.moveToCFrame(CFrame.lookAt(part.Position, part.Position + Vector3.new(0, 0, -1)), Config.delays.moveTimeout, false)
+            Feature.teleportToCFrame(CFrame.lookAt(part.Position, part.Position + Vector3.new(0, 0, -1)))
         end
     end
     return Feature.isCarryingBuharaFood()
@@ -5756,7 +5772,7 @@ end
 
 function Feature.moveToBuharaFeedPrompt(target, prompt)
     if prompt then
-        return Feature.moveNearInstance(prompt, Config.buhara.feedDistance, false)
+        return Feature.teleportToInstance(prompt)
     end
 
     local legCenter = Feature.getBuharaLegCenter(target)
@@ -5764,7 +5780,7 @@ function Feature.moveToBuharaFeedPrompt(target, prompt)
     if not legCenter or not root then
         return false
     end
-    return Feature.moveToCFrame(CFrame.lookAt(legCenter, root.Position), Config.delays.moveTimeout, false)
+    return Feature.teleportToCFrame(CFrame.lookAt(legCenter, root.Position))
 end
 
 function Feature.feedBuhara()

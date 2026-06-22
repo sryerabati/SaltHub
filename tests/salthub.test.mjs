@@ -839,7 +839,7 @@ test("battlepass claim uses claimable data instead of brute force loops", () => 
   assert.doesNotMatch(claimBody, /State\.battlepass\.questIds/);
 });
 
-test("auto buhara reads wanted food and walks instead of blind dropping", () => {
+test("auto buhara reads wanted food and teleports instead of blind dropping", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /buhara = \{/);
@@ -864,7 +864,7 @@ test("auto buhara reads wanted food and walks instead of blind dropping", () => 
   assert.match(source, /FoodNeeded/);
   assert.match(source, /CarryingFood/);
   assert.match(source, /quantity\.Text/);
-  assert.match(source, /Feature\.moveNearInstance\(drop\.instance, Config\.buhara\.foodCollectDistance, false\)/);
+  assert.match(source, /Feature\.teleportToInstance\(drop\.instance\)/);
   assert.match(source, /local prompt = Feature\.getBuharaFeedPrompt\(target\)/);
   assert.match(source, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
   assert.match(source, /Feature\.holdPrompt\(prompt\)/);
@@ -876,24 +876,23 @@ test("auto buhara reads wanted food and walks instead of blind dropping", () => 
   const feedBody = source.match(/function Feature\.feedBuhara\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(feedBody, /Remote\.fire\("BuharaDropFood"\)/);
   const buharaBody = source.match(/function Feature\.getBuharaData\(\)([\s\S]*?)function Feature\.toggleBuhara/)?.[1] ?? "";
-  assert.doesNotMatch(buharaBody, /Feature\.teleportToInstance/);
+  assert.match(buharaBody, /Feature\.teleportToInstance\(drop\.instance\)/);
   assert.doesNotMatch(buharaBody, /for _, instance in ipairs\(workspace:GetDescendants\(\)\) do[\s\S]*?local foodName = Feature\.getBuharaFoodName\(instance\)/);
 });
 
-test("buhara movement disables teleport fallback", () => {
+test("buhara collection and feeding use direct teleport positioning", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
-  assert.match(source, /local PathfindingService = game:GetService\("PathfindingService"\)/);
-  assert.match(source, /function Feature\.followPathToPosition/);
-  assert.match(source, /PathfindingService:CreatePath\(\{/);
-  assert.match(source, /AgentCanJump = true/);
-  assert.match(source, /Enum\.PathWaypointAction\.Jump/);
-  assert.match(source, /humanoid\.Jump = true/);
-  assert.match(source, /function Feature\.moveToCFrame\(targetCFrame, timeout, allowTeleportFallback\)/);
-  assert.match(source, /Feature\.followPathToPosition\(targetPosition, maxWait\)/);
-  assert.match(source, /allowTeleportFallback ~= false/);
-  assert.match(source, /function Feature\.moveNearInstance\(instance, distance, allowTeleportFallback\)/);
-  assert.match(source, /Feature\.moveToCFrame\(CFrame\.lookAt\(targetPosition, targetPart\.Position\), Config\.delays\.moveTimeout, allowTeleportFallback\)/);
+  const collectBody = source.match(/function Feature\.collectBuharaFood\(drop\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(collectBody, /Feature\.teleportToInstance\(drop\.instance\)/);
+  assert.doesNotMatch(collectBody, /Feature\.moveNearInstance\(drop\.instance, Config\.buhara\.foodCollectDistance, false\)/);
+  assert.doesNotMatch(collectBody, /Feature\.moveToCFrame\([^)]*Config\.delays\.moveTimeout,\s*false\)/);
+
+  const feedMoveBody = source.match(/function Feature\.moveToBuharaFeedPrompt\(target, prompt\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(feedMoveBody, /Feature\.teleportToInstance\(prompt\)/);
+  assert.match(feedMoveBody, /Feature\.teleportToCFrame\(CFrame\.lookAt\(legCenter, root\.Position\)\)/);
+  assert.doesNotMatch(feedMoveBody, /Feature\.moveNearInstance\(prompt, Config\.buhara\.feedDistance, false\)/);
+  assert.doesNotMatch(feedMoveBody, /Feature\.moveToCFrame\([^)]*Config\.delays\.moveTimeout,\s*false\)/);
 });
 
 test("auto start wave is gated by owned plot wave state", () => {
