@@ -1,0 +1,11 @@
+{
+  "name": "salthub",
+  "version": "1.0.0",
+  "description": "SaltHub Roblox Lua automation hub.",
+  "type": "module",
+  "scripts": {
+    "serve": "node scripts/serve-salthub.mjs",
+    "test": "node --test tests"
+  },
+  "license": "MIT"
+}
