@@ -296,6 +296,7 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   assert.match(source, /State\.activeEventText/);
   assert.match(source, /State\.lastRollAt/);
   assert.match(source, /State\.rollBusyUntil/);
+  assert.match(source, /State\.pityHoldUntil/);
   assert.doesNotMatch(source, /"Detected Podium"/);
   assert.match(source, /unitMutationTargets = \{\}/);
   assert.match(source, /function UI\.unitMutationSelector/);
@@ -312,6 +313,9 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   assert.match(source, /Config\.roll\.snipeEvents/);
   assert.match(source, /Feature\.attachEventUiTracker\(\)/);
   assert.match(source, /Feature\.isEventStatusText\(descendant\.Text\)/);
+  assert.match(source, /pityHoldPoll = 1\.0/);
+  assert.match(source, /function Feature\.setPityHoldBackoff/);
+  assert.match(source, /function Feature\.getAutoRollLoopDelay/);
   assert.doesNotMatch(source, /UI\.textBox\(main, "Target units, comma separated"/);
   assert.doesNotMatch(source, /UI\.textBox\(main, "Target mutations, comma separated"/);
   assert.doesNotMatch(source, /UI\.multiSelectList\(page, "Target Mutations"/);
@@ -325,7 +329,14 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   const toggleBody = source.match(/function Feature\.toggleAutoRoll\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(toggleBody, /Remote\.fire/);
   assert.match(toggleBody, /Feature\.startLoop\("autoRoll"/);
+  assert.match(toggleBody, /return Feature\.getAutoRollLoopDelay\(\)/);
   assert.match(toggleBody, /Feature\.stopLoop\("autoRoll"\)/);
+
+  const autoRollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(autoRollBody, /if os\.clock\(\) < \(State\.pityHoldUntil or 0\) then[\s\S]*?return/);
+  assert.match(autoRollBody, /Feature\.setPityHoldBackoff\(\)/);
+  assert.match(source, /State\.pityHoldUntil = os\.clock\(\) \+ \(tonumber\(Config\.delays\.pityHoldPoll\) or 1\.0\)/);
+  assert.match(source, /State\.pityHoldUntil = 0/);
 });
 
 test("prompt activation is exact so rolling cannot accidentally buy podium units", () => {

@@ -54,6 +54,7 @@ local Config = {
         roll = 0.12,
         buyScan = 0.12,
         rollSettle = 0.55,
+        pityHoldPoll = 1.0,
         buyPause = 0.9,
         moveTimeout = 1.35,
         merge = 0.8,
@@ -696,6 +697,7 @@ local State = {
     lastWaveStartAt = 0,
     lastRollAt = 0,
     rollBusyUntil = 0,
+    pityHoldUntil = 0,
     lastBuyAt = 0,
     buyingCharacter = false,
     pendingBuy = nil,
@@ -3817,6 +3819,9 @@ function Feature.trackEventUi(...)
 
     State.activeEventText = text
     State.lastEventUiAt = os.clock()
+    if Feature.isActiveEventTextForSelection(text) then
+        State.pityHoldUntil = 0
+    end
 end
 
 function Feature.attachEventUiTracker()
@@ -3940,7 +3945,24 @@ function Feature.shouldHoldPityForEvent()
     return not Feature.isSelectedSnipeEventActive()
 end
 
+function Feature.setPityHoldBackoff()
+    State.pityHoldUntil = os.clock() + (tonumber(Config.delays.pityHoldPoll) or 1.0)
+end
+
+function Feature.getAutoRollLoopDelay()
+    local baseDelay = tonumber(Config.delays.roll) or 0.12
+    local holdRemaining = (tonumber(State.pityHoldUntil) or 0) - os.clock()
+    if holdRemaining > baseDelay then
+        return math.max(baseDelay, holdRemaining)
+    end
+    return baseDelay
+end
+
 function Feature.autoRollStep()
+    if os.clock() < (State.pityHoldUntil or 0) then
+        return
+    end
+
     if State.buyingCharacter then
         return
     end
@@ -3951,12 +3973,15 @@ function Feature.autoRollStep()
     end
 
     if Feature.shouldHoldPityForEvent() then
+        Feature.setPityHoldBackoff()
         if os.clock() - (State.lastPityHoldLogAt or 0) > 3 then
             State.lastPityHoldLogAt = os.clock()
             Log.push("Holding Mythic/Secret in 1 roll for selected event.")
         end
         return
     end
+
+    State.pityHoldUntil = 0
 
     local bought = Feature.autoBuyStep()
     if bought then
@@ -3998,7 +4023,7 @@ function Feature.toggleAutoRoll(value)
     if value then
         Feature.returnToRollStation()
         Feature.startLoop("autoRoll", function()
-            return Config.delays.roll
+            return Feature.getAutoRollLoopDelay()
         end, Feature.autoRollStep)
     else
         Feature.stopLoop("autoRoll")
