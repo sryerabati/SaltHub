@@ -537,16 +537,19 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /rarityWeight = 3/);
   assert.match(source, /rngWeight = 0\.01/);
   assert.match(source, /footprintPenalty = 0\.035/);
-  assert.match(source, /beamWidth = 32/);
-  assert.match(source, /candidateLimit = 64/);
-  assert.match(source, /dpsCandidateLimit = 48/);
-  assert.match(source, /densityCandidateLimit = 32/);
-  assert.match(source, /fillCandidateLimit = 256/);
-  assert.match(source, /replacementPasses = 4/);
+  assert.match(source, /beamWidth = 192/);
+  assert.match(source, /candidateLimit = 128/);
+  assert.match(source, /dpsCandidateLimit = 96/);
+  assert.match(source, /densityCandidateLimit = 64/);
+  assert.match(source, /frontCandidateLimit = 96/);
+  assert.match(source, /fillCandidateLimit = 512/);
+  assert.match(source, /replacementPasses = 10/);
   assert.match(source, /minReplacementGain = 0\.01/);
-  assert.match(source, /frontRangeWeight = 0\.62/);
-  assert.match(source, /frontDpsWeight = 0\.38/);
+  assert.match(source, /frontRangeWeight = 0\.72/);
+  assert.match(source, /frontDpsWeight = 0\.28/);
   assert.match(source, /placementQualityWeight = 250/);
+  assert.match(source, /frontValueWeight = 1\.25/);
+  assert.match(source, /searchVariants = 5/);
   assert.match(source, /CharacterLevelInfo/);
   assert.match(source, /CharacterLevelHelper/);
   assert.match(source, /CharacterStatsUiHelper/);
@@ -600,7 +603,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /State\.characterStatsUiHelper[\s\S]*GetDps/);
   assert.match(source, /helper\.GetDps\(unit\.name, statModel, info, unit\.mutation, traitInfo\)/);
   assert.match(source, /local lowRange = rangeSpan > 0 and \(maxRange - range\) \/ rangeSpan or 0/);
-  assert.match(source, /candidate\.frontPriority = lowRange \* \(tonumber\(Config\.bestLineup\.frontRangeWeight\) or 0\.62\)/);
+  assert.match(source, /candidate\.frontPriority = lowRange \* \(tonumber\(Config\.bestLineup\.frontRangeWeight\) or 0\.72\)/);
   assert.match(source, /return Feature\.getLineupPlacementScore\(candidate, a, gridMap, metrics\) > Feature\.getLineupPlacementScore\(candidate, b, gridMap, metrics\)/);
   assert.match(source, /state\.score \+ candidate\.score \+ cellsAdded \* \(tonumber\(Config\.bestLineup\.fillWeight\) or 0\) \+ Feature\.getLineupPlacementScore\(candidate, placement, gridMap, metrics\)/);
   assert.doesNotMatch(source, /- derived\.cooldown \* \(tonumber\(Config\.bestLineup\.cooldownWeight\)/);
@@ -610,11 +613,39 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.doesNotMatch(planBody, /State\.loadSharedInfo\(\)/);
   assert.match(planBody, /Feature\.ensureBestLineupData\(\)/);
   assert.match(source, /local metrics = Feature\.getLineupCellMetrics\(cells\)/);
-  assert.match(source, /Feature\.buildBestLineupBeamPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates, metrics\)/);
-  assert.match(source, /Feature\.buildBestLineupBeamPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)/);
+  assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates, metrics\)/);
+  assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)/);
   assert.match(source, /Feature\.improveBestLineupPlan\(plan, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
   assert.match(source, /"Place Best Lineup"/);
   assert.doesNotMatch(source, /function Feature\.placeBestLineup[\s\S]*?Remote\.fire\("AutoMergeToggle"/);
+});
+
+test("best lineup optimizer explores front-heavy variants before accepting a plan", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /beamWidth = 192/);
+  assert.match(source, /candidateLimit = 128/);
+  assert.match(source, /frontCandidateLimit = 96/);
+  assert.match(source, /fillCandidateLimit = 512/);
+  assert.match(source, /replacementPasses = 10/);
+  assert.match(source, /frontValueWeight = 1\.25/);
+  assert.match(source, /searchVariants = 5/);
+  assert.match(source, /function Feature\.getLineupPlacementValue/);
+  assert.match(source, /function applyBestLineupOptimizerDefaults/);
+  assert.match(source, /best\.beamWidth = math\.max\(tonumber\(best\.beamWidth\) or 0, 192\)/);
+  assert.match(source, /best\.frontRangeWeight = math\.max\(tonumber\(best\.frontRangeWeight\) or 0, 0\.72\)/);
+  assert.match(source, /best\.frontDpsWeight = math\.min\(tonumber\(best\.frontDpsWeight\) or 0\.28, 0\.28\)/);
+  assert.match(source, /applyBestLineupOptimizerDefaults\(\)/);
+  assert.match(source, /\(tonumber\(candidate and candidate\.score\) or 0\) \* \(tonumber\(Config\.bestLineup\.frontValueWeight\) or 1\.25\)/);
+  assert.match(source, /function Feature\.sortLineupCandidatesByFrontNeed/);
+  assert.match(source, /function Feature\.getBestLineupCandidateOrderVariants/);
+  assert.match(source, /function Feature\.selectBestLineupPlan/);
+  assert.match(source, /function Feature\.buildBestLineupMultiVariantPlan/);
+  assert.match(source, /Feature\.buildBestLineupBeamPlan\(ordered, cells, gridMap, baseOccupancy, fillCandidates, metrics\)/);
+  assert.match(source, /Feature\.selectBestLineupPlan\(plans, baseOccupancy\)/);
+  assert.match(source, /addFrom\(byFrontNeed, math\.max\(1, tonumber\(Config\.bestLineup\.frontCandidateLimit\) or limit\)\)/);
+  assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates, metrics\)/);
+  assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)/);
 });
 
 test("auto merge places the best trait unit first so its trait is preserved", () => {
