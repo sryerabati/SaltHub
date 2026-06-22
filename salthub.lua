@@ -75,6 +75,7 @@ local Config = {
     },
     wave = {
         fastForward = "x2",
+        startHighest = true,
     },
     roll = {
         targetUnits = {},
@@ -387,6 +388,7 @@ local Remote = {
         FastForward = { "ReplicatedStorage", "Remotes", "Start", "FastForward" },
         AutoSkip = { "ReplicatedStorage", "Remotes", "Start", "AutoSkip" },
         WaveUiState = { "ReplicatedStorage", "Remotes", "Start", "WaveUiState" },
+        Checkpoint = { "ReplicatedStorage", "Remotes", "Checkpoint" },
         Upgrade = { "ReplicatedStorage", "Remotes", "Upgrade" },
         TraitRequest = { "ReplicatedStorage", "Remotes", "Trait", "Request" },
         CloneRequest = { "ReplicatedStorage", "Remotes", "Clone", "Request" },
@@ -2788,8 +2790,49 @@ function Feature.shouldStartWave()
     return os.clock() - (State.lastWaveStartAt or 0) >= startCooldown
 end
 
+local WAVE_CHECKPOINTS = { 0, 25, 50, 75 }
+
+function Feature.getHighestWaveCheckpoint()
+    local unlocked = tonumber(LocalPlayer:GetAttribute("Checkpoint"))
+        or tonumber(Feature.dataGet("Checkpoint", nil))
+        or tonumber(Feature.dataGet("HighestWave", nil))
+        or 0
+    local target = 0
+    for _, checkpoint in ipairs(WAVE_CHECKPOINTS) do
+        if unlocked >= checkpoint then
+            target = checkpoint
+        end
+    end
+    return target
+end
+
+function Feature.ensureHighestWaveCheckpoint()
+    local target = Feature.getHighestWaveCheckpoint()
+    if target <= 0 then
+        return true
+    end
+
+    local selected = tonumber(Feature.dataGet({ "Settings", "Checkpoint" }, nil))
+    if selected == nil or selected == target then
+        return true
+    end
+
+    if os.clock() - (State.lastCheckpointSelectAt or 0) < math.max(Config.safety.remoteCooldown, 0.35) then
+        return false
+    end
+
+    State.lastCheckpointSelectAt = os.clock()
+    Log.push("Selecting wave checkpoint " .. tostring(target) .. " (current " .. tostring(selected) .. ").")
+    Remote.fire("Checkpoint")
+    return false
+end
+
 function Feature.autoStartWaveStep()
     if not Feature.shouldStartWave() then
+        return
+    end
+
+    if Config.wave.startHighest ~= false and not Feature.ensureHighestWaveCheckpoint() then
         return
     end
 
@@ -6393,11 +6436,10 @@ local Tabs = {
                     Feature.stopLoop("autoFastForward")
                 end
             end)
-            UI.toggle(controls, "Auto Skip", function()
-                return Config.flags.autoSkip
+            UI.toggle(controls, "Start Highest Wave", function()
+                return Config.wave.startHighest ~= false
             end, function(value)
-                Config.flags.autoSkip = value
-                Remote.fire("AutoSkip", value)
+                Config.wave.startHighest = value == true
             end)
             UI.cycle(controls, "Fast Forward", function()
                 return { "x1", "x2", "x3" }

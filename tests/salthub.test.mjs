@@ -985,17 +985,28 @@ test("auto start wave is gated by owned plot wave state", () => {
 
   assert.match(source, /function Feature\.isWaveStarted/);
   assert.match(source, /function Feature\.shouldStartWave/);
+  assert.match(source, /function Feature\.getHighestWaveCheckpoint/);
+  assert.match(source, /function Feature\.ensureHighestWaveCheckpoint/);
   assert.match(source, /function Feature\.autoStartWaveStep/);
+  assert.match(source, /Checkpoint = \{ "ReplicatedStorage", "Remotes", "Checkpoint" \}/);
   assert.match(source, /plot:GetAttribute\("WaveStarted"\) == true/);
   assert.match(source, /State\.lastWaveStartAt/);
   assert.match(source, /os\.clock\(\) - \(State\.lastWaveStartAt or 0\)/);
 
   const stepBody = source.match(/function Feature\.autoStartWaveStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(stepBody, /if not Feature\.shouldStartWave\(\) then[\s\S]*?return/);
+  assert.match(stepBody, /if Config\.wave\.startHighest ~= false and not Feature\.ensureHighestWaveCheckpoint\(\) then[\s\S]*?return/);
   assert.match(stepBody, /State\.lastWaveStartAt = os\.clock\(\)/);
   assert.match(stepBody, /Remote\.fire\("StartWave"\)/);
+
+  const checkpointBody = source.match(/function Feature\.ensureHighestWaveCheckpoint\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(checkpointBody, /Feature\.getHighestWaveCheckpoint\(\)/);
+  assert.match(checkpointBody, /Feature\.dataGet\(\{ "Settings", "Checkpoint" \}, nil\)/);
+  assert.match(checkpointBody, /Remote\.fire\("Checkpoint"\)/);
 
   const waveTabBody = source.match(/Feature\.startLoop\("autoStartWave"[\s\S]*?\n\s*end\)/)?.[0] ?? "";
   assert.match(waveTabBody, /Feature\.autoStartWaveStep/);
   assert.doesNotMatch(waveTabBody, /function\(\)\s*Remote\.fire\("StartWave"\)\s*end/);
+  assert.match(source, /UI\.toggle\(controls, "Start Highest Wave"/);
+  assert.doesNotMatch(source, /UI\.toggle\(controls, "Auto Skip"/);
 });
