@@ -570,6 +570,11 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.refreshPlacementOccupancy/);
   assert.match(source, /function Feature\.scoreLineupUnit/);
   assert.match(source, /function Feature\.getLineupFrontReferencePosition/);
+  assert.match(source, /local fullName = normalizeText\(descendant:GetFullName\(\)\)/);
+  assert.match(source, /fullName:find\("enemyspawn", 1, true\)/);
+  assert.match(source, /local minZ = math\.huge/);
+  assert.match(source, /minZ = math\.min\(minZ, cell\.Position\.Z\)/);
+  assert.match(source, /return Vector3\.new\(sumX \/ count, 0, minZ - cellSize \* 6\)/);
   assert.match(source, /function Feature\.getLineupCellMetrics/);
   assert.match(source, /function Feature\.assignLineupFrontPriorities/);
   assert.match(source, /function Feature\.getLineupPlacementFrontScore/);

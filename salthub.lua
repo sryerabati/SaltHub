@@ -4539,14 +4539,23 @@ function Feature.getLineupFrontReferencePosition(cells)
             if part then
                 table.insert(references, part.Position)
             end
+            return
+        end
+        if instance:IsA("Instance") then
+            local part = instance:FindFirstChildWhichIsA("BasePart", true)
+            if part then
+                table.insert(references, part.Position)
+            end
         end
     end
 
     if plot then
         for _, descendant in ipairs(plot:GetDescendants()) do
             local name = normalizeText(descendant.Name)
+            local fullName = normalizeText(descendant:GetFullName())
             if name:find("enemybase", 1, true) or name:find("enemy base", 1, true)
-                or name:find("spawn", 1, true) or name:find("gate", 1, true) then
+                or name:find("spawn", 1, true) or name:find("gate", 1, true)
+                or fullName:find("enemyspawn", 1, true) or fullName:find("enemy spawn", 1, true) then
                 addReference(descendant)
             end
         end
@@ -4560,13 +4569,13 @@ function Feature.getLineupFrontReferencePosition(cells)
         return sum / #references
     end
 
-    local maxZ = -math.huge
+    local minZ = math.huge
     local sumX = 0
     local count = 0
     local cellSize = 4
     for _, cell in ipairs(cells or {}) do
         if cell:IsA("BasePart") then
-            maxZ = math.max(maxZ, cell.Position.Z)
+            minZ = math.min(minZ, cell.Position.Z)
             sumX += cell.Position.X
             count += 1
             cellSize = math.max(cellSize, cell.Size.Z)
@@ -4576,7 +4585,7 @@ function Feature.getLineupFrontReferencePosition(cells)
         return nil
     end
 
-    return Vector3.new(sumX / count, 0, maxZ + cellSize * 6)
+    return Vector3.new(sumX / count, 0, minZ - cellSize * 6)
 end
 
 function Feature.getLineupCellMetrics(cells)
