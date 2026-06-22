@@ -123,6 +123,7 @@ local Config = {
         rangeOrderRebuild = true,
         shortRangeBackLimit = 50,
         shortRangeBackMinFrontScore = 0.5,
+        backfillRemainingSpace = true,
         searchVariants = 5,
         maxPlacements = 60,
         skipEquipped = false,
@@ -213,6 +214,9 @@ local function applyBestLineupOptimizerDefaults()
     end
     best.shortRangeBackLimit = math.max(tonumber(best.shortRangeBackLimit) or 0, 50)
     best.shortRangeBackMinFrontScore = math.max(tonumber(best.shortRangeBackMinFrontScore) or 0, 0.5)
+    if best.backfillRemainingSpace == nil then
+        best.backfillRemainingSpace = true
+    end
     best.searchVariants = math.max(tonumber(best.searchVariants) or 0, 5)
 end
 
@@ -5307,6 +5311,62 @@ function Feature.fillBestLineupPlan(plan, candidates, cells, gridMap, maxPlaceme
     return filled
 end
 
+function Feature.sortLineupBackfillCandidates(candidates)
+    local ordered = copyArray(candidates or {})
+    table.sort(ordered, function(a, b)
+        local rangeA = tonumber(a and a.derived and a.derived.range) or 0
+        local rangeB = tonumber(b and b.derived and b.derived.range) or 0
+        if rangeA ~= rangeB then
+            return rangeA > rangeB
+        end
+        local dpsA = tonumber(a and a.derived and a.derived.dps) or 0
+        local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
+        if dpsA ~= dpsB then
+            return dpsA > dpsB
+        end
+        local scoreA = tonumber(a and a.score) or 0
+        local scoreB = tonumber(b and b.score) or 0
+        if scoreA ~= scoreB then
+            return scoreA > scoreB
+        end
+        return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
+    end)
+    return ordered
+end
+
+function Feature.fillBestLineupBackfillPlan(plan, candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics)
+    if Config.bestLineup.backfillRemainingSpace == false then
+        return plan or {}
+    end
+
+    local filled = copyArray(plan or {})
+    local occupancy, selected = Feature.getLineupPlanStats(filled, baseOccupancy)
+    local placementLimit = tonumber(maxPlacements) or math.huge
+
+    for _, candidate in ipairs(Feature.sortLineupBackfillCandidates(candidates)) do
+        if #filled >= placementLimit then
+            break
+        end
+        local id = Feature.getLineupCandidateKey(candidate)
+        if id ~= "" and not selected[id] then
+            local options = Feature.getBestLineupPlacementOptions(candidate, cells, gridMap, occupancy, metrics)
+            local placement = options[1]
+            if placement then
+                local item = Feature.makeLineupPlanItem(candidate, placement, gridMap, metrics)
+                item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+                item.backfill = true
+                table.insert(filled, item)
+                selected[id] = true
+                for _, cellName in ipairs(placement.occupiedCells or {}) do
+                    occupancy[cellName] = item
+                end
+            end
+        end
+    end
+
+    return filled
+end
+
 function Feature.getLineupPlacementBlockers(placement, occupancy, itemSet)
     local blockers = {}
     local seen = {}
@@ -5445,7 +5505,8 @@ function Feature.buildBestLineupBeamPlan(candidates, cells, gridMap, baseOccupan
     local best = Feature.rankBestLineupStates(states, 1)[1]
     local plan = best and best.plan or {}
     local improved = Feature.improveBestLineupPlan(plan, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics)
-    return Feature.rebuildBestLineupPlanByRange(improved, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics)
+    local ranged = Feature.rebuildBestLineupPlanByRange(improved, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics)
+    return Feature.fillBestLineupBackfillPlan(ranged, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics)
 end
 
 function Feature.getBestLineupCandidateOrderVariants(candidates)

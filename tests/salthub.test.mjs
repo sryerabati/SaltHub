@@ -554,6 +554,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /rangeOrderRebuild = true/);
   assert.match(source, /shortRangeBackLimit = 50/);
   assert.match(source, /shortRangeBackMinFrontScore = 0\.5/);
+  assert.match(source, /backfillRemainingSpace = true/);
   assert.match(source, /searchVariants = 5/);
   assert.match(source, /CharacterLevelInfo/);
   assert.match(source, /CharacterLevelHelper/);
@@ -594,6 +595,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.rebuildBestLineupPlanByRange/);
   assert.match(source, /function Feature\.shouldSkipLineupFillerPlacement/);
   assert.match(source, /function Feature\.fillBestLineupPlan/);
+  assert.match(source, /function Feature\.fillBestLineupBackfillPlan/);
   assert.match(source, /function Feature\.improveBestLineupPlan/);
   assert.match(source, /function Feature\.buildBestLineupBeamPlan/);
   assert.match(source, /function Feature\.buildBestLineupCandidates/);
@@ -628,6 +630,8 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /Feature\.rebuildBestLineupPlanByRange\(improved, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
   assert.match(source, /Feature\.shouldSkipLineupFillerPlacement\(candidate, placement, gridMap, metrics\)/);
   assert.match(source, /Feature\.getLineupPlacementMinFrontScore\(placement, gridMap, metrics\)/);
+  assert.match(source, /Feature\.fillBestLineupBackfillPlan\(ranged, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
+  assert.match(source, /item\.backfill = true/);
   const planBody = source.match(/function Feature\.getBestLineupPlan\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(planBody, /State\.loadSharedInfo\(\)/);
   assert.match(planBody, /Feature\.ensureBestLineupData\(\)/);
