@@ -40,6 +40,12 @@ local Config = {
     export = {
         scriptUrl = LAUNCH_SCRIPT_URL,
     },
+    storage = {
+        autoSave = true,
+        folder = "SaltHub",
+        fileName = "settings.json",
+        saveDelay = 0.35,
+    },
     safety = {
         remoteCooldown = 0.35,
     },
@@ -178,11 +184,95 @@ local function mergeConfig(target, source)
     end
 end
 
+local workspaceConfigLoaded = false
+local workspaceConfigStatus = nil
+
+local function getExecutorConfigPath()
+    local storage = Config.storage or {}
+    local folder = tostring(storage.folder or "SaltHub")
+    local fileName = tostring(storage.fileName or "settings.json")
+    if folder == "" then
+        return fileName
+    end
+    return folder .. "/" .. fileName
+end
+
+local function ensureExecutorConfigFolder()
+    local storage = Config.storage or {}
+    local folder = tostring(storage.folder or "SaltHub")
+    if folder == "" then
+        return true
+    end
+    if type(makefolder) ~= "function" then
+        return true
+    end
+    if type(isfolder) == "function" then
+        local ok, exists = pcall(isfolder, folder)
+        if ok and exists then
+            return true
+        end
+    end
+    local ok, err = pcall(makefolder, folder)
+    if ok then
+        return true
+    end
+    if type(isfolder) == "function" then
+        local existsOk, exists = pcall(isfolder, folder)
+        if existsOk and exists then
+            return true
+        end
+    end
+    return false, err
+end
+
+local function readExecutorConfigFile()
+    local path = getExecutorConfigPath()
+    if type(readfile) ~= "function" then
+        return nil, "readfile unavailable"
+    end
+    if type(isfile) == "function" then
+        local ok, exists = pcall(isfile, path)
+        if ok and not exists then
+            return nil, nil
+        end
+    end
+    local ok, contents = pcall(readfile, path)
+    if not ok then
+        return nil, contents
+    end
+    if type(contents) ~= "string" or contents == "" then
+        return nil, nil
+    end
+    return contents, nil
+end
+
+local function applySavedConfigFromWorkspace()
+    local contents, readErr = readExecutorConfigFile()
+    if not contents then
+        workspaceConfigStatus = readErr
+        return false
+    end
+
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(contents)
+    end)
+    if not ok or type(decoded) ~= "table" then
+        workspaceConfigStatus = decoded or "invalid saved settings"
+        warn("[SaltHub] Failed to decode saved settings.")
+        return false
+    end
+
+    mergeConfig(Config, decoded.Config or decoded)
+    workspaceConfigLoaded = true
+    workspaceConfigStatus = getExecutorConfigPath()
+    return true
+end
+
 local function applyPresetFromGlobal()
     local env = getgenv and getgenv()
     local preset = env and env.SaltHubPreset
-    if not preset then
-        return
+    if preset == nil or preset == "" then
+        return false
     end
 
     local decoded = preset
@@ -192,7 +282,7 @@ local function applyPresetFromGlobal()
         end)
         if not ok then
             warn("[SaltHub] Failed to decode preset.")
-            return
+            return true
         end
         decoded = value
     end
@@ -200,9 +290,13 @@ local function applyPresetFromGlobal()
     if type(decoded) == "table" then
         mergeConfig(Config, decoded.Config or decoded)
     end
+    return true
 end
 
-applyPresetFromGlobal()
+local presetApplied = applyPresetFromGlobal()
+if not presetApplied then
+    applySavedConfigFromWorkspace()
+end
 
 local Maid = { items = {} }
 function Maid:add(item)
@@ -552,6 +646,9 @@ local State = {
     buharaTarget = nil,
     buharaTargetScanAt = 0,
     lastBestLineupSummary = "",
+    configSaveQueued = false,
+    configSaveReason = nil,
+    lastConfigSaveAt = 0,
 }
 
 local DataSource = {}
@@ -1594,6 +1691,9 @@ function UI.toggle(parent, text, getter, setter)
     end
     button.MouseButton1Click:Connect(function()
         setter(not getter())
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(text))
+        end
         redraw()
     end)
     redraw()
@@ -1622,6 +1722,9 @@ function UI.textBox(parent, title, initial, callback)
     box.Parent = parent
     box.FocusLost:Connect(function()
         callback(box.Text)
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(title))
+        end
     end)
     return box
 end
@@ -1639,6 +1742,9 @@ function UI.cycle(parent, title, options, getter, setter)
             index = 1
         end
         setter(list[index])
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(title))
+        end
     end)
     Maid:add(RunService.Heartbeat:Connect(function()
         if button and button.Parent then
@@ -1711,6 +1817,9 @@ function UI.slider(parent, title, getter, setter, minValue, maxValue, stepValue)
         local width = math.max(track.AbsoluteSize.X, 1)
         local alpha = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
         setter(normalize(min + (max - min) * alpha))
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(title))
+        end
         redraw()
     end
 
@@ -1776,6 +1885,9 @@ function UI.multiSelectList(parent, title, optionsGetter, selectedGetter, setter
             end
         end
         setter(uniqueSorted(out))
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(title))
+        end
     end
 
     local function refresh()
@@ -1880,6 +1992,9 @@ function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, 
             })
             row.MouseButton1Click:Connect(function()
                 setter(unit)
+                if Feature and Feature.scheduleConfigSave then
+                    Feature.scheduleConfigSave("ui:" .. tostring(title))
+                end
                 refresh()
             end)
             row.Parent = list
@@ -1945,6 +2060,9 @@ function UI.traitSelector(parent, title, optionsGetter, selectedGetter, setter, 
             end
         end
         setter(out)
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(title))
+        end
     end
 
     local function refresh()
@@ -2043,6 +2161,9 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
             end
         end
         onChanged(uniqueSorted(units), mutationTargets)
+        if Feature and Feature.scheduleConfigSave then
+            Feature.scheduleConfigSave("ui:" .. tostring(title))
+        end
     end
 
     local function setUnit(unit, enabled)
@@ -2352,6 +2473,70 @@ Feature = {
     battlepassReward = nil,
     antiAfkConnection = nil,
 }
+
+function Feature.getConfigStoragePath()
+    return getExecutorConfigPath()
+end
+
+function Feature.saveConfigToWorkspace(reason, quiet)
+    if Config.storage and Config.storage.autoSave == false then
+        if not quiet then
+            Log.push("Settings auto-save is disabled.")
+        end
+        return false
+    end
+    if type(writefile) ~= "function" then
+        if not quiet then
+            Log.push("Settings save skipped: executor writefile unavailable.")
+        end
+        return false
+    end
+
+    local folderOk, folderErr = ensureExecutorConfigFolder()
+    if not folderOk then
+        Log.push("Settings save folder failed: " .. tostring(folderErr))
+        return false
+    end
+
+    local ok, encoded = pcall(function()
+        return HttpService:JSONEncode(Feature.getSerializableConfig())
+    end)
+    if not ok then
+        Log.push("Settings save failed: " .. tostring(encoded))
+        return false
+    end
+
+    local path = getExecutorConfigPath()
+    local saveOk, saveErr = pcall(writefile, path, encoded)
+    if saveOk then
+        State.lastConfigSaveAt = os.clock()
+        if not quiet then
+            Log.push("Settings saved to executor workspace: " .. tostring(path))
+        end
+        return true
+    end
+
+    Log.push("Settings save failed: " .. tostring(saveErr))
+    return false
+end
+
+function Feature.scheduleConfigSave(reason)
+    if Config.storage and Config.storage.autoSave == false then
+        return false
+    end
+    State.configSaveReason = reason or "changed"
+    if State.configSaveQueued then
+        return true
+    end
+
+    State.configSaveQueued = true
+    local delaySeconds = tonumber(Config.storage and Config.storage.saveDelay) or 0.35
+    task.delay(delaySeconds, function()
+        State.configSaveQueued = false
+        Feature.saveConfigToWorkspace(State.configSaveReason, true)
+    end)
+    return true
+end
 
 function Feature.stopLoop(key)
     Feature.loops[key] = nil
@@ -6790,18 +6975,11 @@ function Feature.importConfig(text)
         return HttpService:JSONDecode(text)
     end)
     if ok and type(decoded) == "table" then
-        for key, value in pairs(decoded) do
-            if type(Config[key]) == "table" and type(value) == "table" then
-                for subKey, subValue in pairs(value) do
-                    Config[key][subKey] = subValue
-                end
-            else
-                Config[key] = value
-            end
-        end
+        mergeConfig(Config, decoded.Config or decoded)
         if UI.scale then
             UI.scale.Scale = Config.ui.scale
         end
+        Feature.scheduleConfigSave("import")
         Log.push("Imported config.")
     else
         Log.push("Invalid JSON config.")
@@ -7069,6 +7247,7 @@ local Tabs = {
                 Feature.restartAntiAfkLoop()
             end, 30, 300, 15)
             UI.button(ui, "Test Anti-AFK", Feature.testAntiAfk, Theme.accent)
+            UI.button(ui, "Save Settings Now", Feature.saveConfigToWorkspace, Theme.accent2)
             UI.button(ui, "Copy Launch Script", Feature.exportLaunchScript, Theme.accent)
             UI.textBox(ui, "Paste JSON config then press Enter", "", Feature.importConfig)
             UI.button(ui, "Destroy GUI", function()
@@ -7092,10 +7271,18 @@ function SaltHub.Start()
         UI.tabs[tab.name].page.Parent = UI.content
     end
     UI.showTab("Wave")
+    if workspaceConfigLoaded then
+        Log.push("Loaded settings from executor workspace: " .. tostring(workspaceConfigStatus or getExecutorConfigPath()))
+    elseif workspaceConfigStatus and workspaceConfigStatus ~= "readfile unavailable" then
+        Log.push("Settings auto-load skipped: " .. tostring(workspaceConfigStatus))
+    end
     Log.push("Loaded SaltHub. Toggle with LeftAlt.")
 end
 
 function SaltHub.Destroy()
+    if State.configSaveQueued then
+        Feature.saveConfigToWorkspace("destroy", true)
+    end
     for key in pairs(Feature.loops) do
         Feature.stopLoop(key)
     end

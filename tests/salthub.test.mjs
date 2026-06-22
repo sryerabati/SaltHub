@@ -909,6 +909,26 @@ test("settings export copies a reusable launch script with embedded preset", () 
   assert.match(source, /"Copy Launch Script"/);
 });
 
+test("settings auto save to executor workspace and load when no preset exists", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /storage = \{/);
+  assert.match(source, /folder = "SaltHub"/);
+  assert.match(source, /fileName = "settings\.json"/);
+  assert.match(source, /function getExecutorConfigPath/);
+  assert.match(source, /function applySavedConfigFromWorkspace/);
+  assert.match(source, /readfile/);
+  assert.match(source, /writefile/);
+  assert.match(source, /makefolder/);
+  assert.match(source, /local presetApplied = applyPresetFromGlobal\(\)/);
+  assert.match(source, /if not presetApplied then\s+applySavedConfigFromWorkspace\(\)/);
+  assert.match(source, /function Feature\.saveConfigToWorkspace/);
+  assert.match(source, /function Feature\.scheduleConfigSave/);
+  assert.match(source, /Feature\.scheduleConfigSave\("ui:" \.\. tostring\(text\)\)/);
+  assert.match(source, /Feature\.scheduleConfigSave\("import"\)/);
+  assert.match(source, /UI\.button\(ui, "Save Settings Now", Feature\.saveConfigToWorkspace/);
+});
+
 test("auto upgrade is cash gated and prioritized", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
