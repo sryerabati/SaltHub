@@ -947,10 +947,16 @@ test("settings auto save to executor workspace and load when no preset exists", 
   assert.match(source, /folder = "SaltHub"/);
   assert.match(source, /fileName = "settings\.json"/);
   assert.match(source, /function getExecutorConfigPath/);
+  assert.match(source, /function getExecutorConfigCandidatePaths/);
+  assert.match(source, /flatFolder \.\. "_" \.\. fileName/);
+  assert.match(source, /add\("salthub_" \.\. fileName\)/);
   assert.match(source, /function applySavedConfigFromWorkspace/);
   assert.match(source, /readfile/);
   assert.match(source, /writefile/);
   assert.match(source, /makefolder/);
+  assert.match(source, /for _, path in ipairs\(getExecutorConfigCandidatePaths\(\)\) do/);
+  assert.match(source, /State\.lastConfigSavePath = path/);
+  assert.match(source, /State\.lastConfigSaveError = tostring\(lastErr or "unknown writefile failure"\)/);
   assert.match(source, /local presetApplied = applyPresetFromGlobal\(\)/);
   assert.match(source, /if not presetApplied then\s+applySavedConfigFromWorkspace\(\)/);
   assert.match(source, /function Feature\.saveConfigToWorkspace/);

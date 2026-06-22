@@ -217,9 +217,35 @@ local function getExecutorConfigPath()
     return folder .. "/" .. fileName
 end
 
-local function ensureExecutorConfigFolder()
+local function getExecutorConfigCandidatePaths()
     local storage = Config.storage or {}
     local folder = tostring(storage.folder or "SaltHub")
+    local fileName = tostring(storage.fileName or "settings.json")
+    local paths = {}
+    local seen = {}
+    local function add(path)
+        if type(path) == "string" and path ~= "" and not seen[path] then
+            seen[path] = true
+            table.insert(paths, path)
+        end
+    end
+
+    add(getExecutorConfigPath())
+    if folder ~= "" then
+        local flatFolder = folder:gsub("[/\\]+", "_")
+        add(flatFolder .. "_" .. fileName)
+    end
+    add("salthub_" .. fileName)
+    return paths
+end
+
+local function getExecutorFolderFromPath(path)
+    return tostring(path or ""):match("^(.*)/[^/]+$")
+end
+
+local function ensureExecutorConfigFolder(folderOverride)
+    local storage = Config.storage or {}
+    local folder = folderOverride or tostring(storage.folder or "SaltHub")
     if folder == "" then
         return true
     end
@@ -246,28 +272,32 @@ local function ensureExecutorConfigFolder()
 end
 
 local function readExecutorConfigFile()
-    local path = getExecutorConfigPath()
     if type(readfile) ~= "function" then
         return nil, "readfile unavailable"
     end
-    if type(isfile) == "function" then
-        local ok, exists = pcall(isfile, path)
-        if ok and not exists then
-            return nil, nil
+
+    local lastErr = nil
+    for _, path in ipairs(getExecutorConfigCandidatePaths()) do
+        if type(isfile) == "function" then
+            local ok, exists = pcall(isfile, path)
+            if ok and not exists then
+                continue
+            end
+        end
+
+        local ok, contents = pcall(readfile, path)
+        if ok and type(contents) == "string" and contents ~= "" then
+            return contents, nil, path
+        end
+        if not ok then
+            lastErr = contents
         end
     end
-    local ok, contents = pcall(readfile, path)
-    if not ok then
-        return nil, contents
-    end
-    if type(contents) ~= "string" or contents == "" then
-        return nil, nil
-    end
-    return contents, nil
+    return nil, lastErr
 end
 
 local function applySavedConfigFromWorkspace()
-    local contents, readErr = readExecutorConfigFile()
+    local contents, readErr, path = readExecutorConfigFile()
     if not contents then
         workspaceConfigStatus = readErr
         return false
@@ -284,7 +314,7 @@ local function applySavedConfigFromWorkspace()
 
     mergeConfig(Config, decoded.Config or decoded)
     workspaceConfigLoaded = true
-    workspaceConfigStatus = getExecutorConfigPath()
+    workspaceConfigStatus = path or getExecutorConfigPath()
     return true
 end
 
@@ -2513,12 +2543,6 @@ function Feature.saveConfigToWorkspace(reason, quiet)
         return false
     end
 
-    local folderOk, folderErr = ensureExecutorConfigFolder()
-    if not folderOk then
-        Log.push("Settings save folder failed: " .. tostring(folderErr))
-        return false
-    end
-
     local ok, encoded = pcall(function()
         return HttpService:JSONEncode(Feature.getSerializableConfig())
     end)
@@ -2527,17 +2551,28 @@ function Feature.saveConfigToWorkspace(reason, quiet)
         return false
     end
 
-    local path = getExecutorConfigPath()
-    local saveOk, saveErr = pcall(writefile, path, encoded)
-    if saveOk then
-        State.lastConfigSaveAt = os.clock()
-        if not quiet then
-            Log.push("Settings saved to executor workspace: " .. tostring(path))
+    local lastErr = nil
+    for _, path in ipairs(getExecutorConfigCandidatePaths()) do
+        local folder = getExecutorFolderFromPath(path)
+        local folderOk, folderErr = ensureExecutorConfigFolder(folder)
+        if folderOk then
+            local saveOk, saveErr = pcall(writefile, path, encoded)
+            if saveOk then
+                State.lastConfigSaveAt = os.clock()
+                State.lastConfigSavePath = path
+                if not quiet then
+                    Log.push("Settings saved to executor workspace: " .. tostring(path))
+                end
+                return true
+            end
+            lastErr = saveErr
+        else
+            lastErr = folderErr
         end
-        return true
     end
 
-    Log.push("Settings save failed: " .. tostring(saveErr))
+    State.lastConfigSaveError = tostring(lastErr or "unknown writefile failure")
+    Log.push("Settings save failed: " .. State.lastConfigSaveError)
     return false
 end
 
