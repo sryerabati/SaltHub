@@ -82,7 +82,7 @@ local Config = {
         autoUpgrade = false,
         autoBuhara = false,
         autoBattlepass = false,
-        optimizeNativeMenus = false,
+        optimizeNativeMenus = true,
     },
     wave = {
         fastForward = "x2",
@@ -248,7 +248,7 @@ local function applyBestLineupOptimizerDefaults()
 end
 
 local function applyNativeMenuOptimizerSafetyDefaults()
-    Config.flags.optimizeNativeMenus = false
+    Config.flags.optimizeNativeMenus = true
     local mode = tostring(Config.safety.nativePreviewMode or ""):lower():gsub("%s+", "")
     if mode == "" or mode == "static" then
         Config.safety.nativePreviewMode = "Hide"

@@ -275,7 +275,7 @@ test("anti afk interval starts a periodic pulse loop before Roblox idled fires",
 test("native menu optimizer freezes or hides preview viewports across game menus", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
-  assert.match(source, /optimizeNativeMenus = false/);
+  assert.match(source, /optimizeNativeMenus = true/);
   assert.match(source, /nativePreviewBatch = 12/);
   assert.match(source, /nativePreviewMode = "Hide"/);
   assert.match(source, /function Feature\.freezeNativePreviewViewport/);
@@ -286,7 +286,7 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /function Feature\.attachNativeMenuOptimizer/);
   assert.match(source, /function Feature\.setNativeMenuOptimizerEnabled/);
   assert.match(source, /function applyNativeMenuOptimizerSafetyDefaults/);
-  assert.match(source, /Config\.flags\.optimizeNativeMenus = false/);
+  assert.match(source, /Config\.flags\.optimizeNativeMenus = true/);
   assert.match(source, /Config\.safety\.nativePreviewMode = "Hide"/);
   assert.match(source, /"Inventory",[\s\S]*"Inventory_Old",[\s\S]*"Clone",[\s\S]*"Selection",[\s\S]*"Shop",[\s\S]*"Index"/);
   assert.match(source, /descendant:IsA\("ViewportFrame"\)/);
