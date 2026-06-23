@@ -48,6 +48,7 @@ local Config = {
     },
     safety = {
         remoteCooldown = 0.35,
+        nativePreviewBatch = 12,
     },
     delays = {
         wave = 1.5,
@@ -79,6 +80,7 @@ local Config = {
         autoUpgrade = false,
         autoBuhara = false,
         autoBattlepass = false,
+        optimizeNativeMenus = true,
     },
     wave = {
         fastForward = "x2",
@@ -2573,6 +2575,9 @@ Feature = {
     upgradeInfo = nil,
     battlepassReward = nil,
     antiAfkConnection = nil,
+    nativeMenuOptimizerConnection = nil,
+    nativeMenuRootConnections = {},
+    nativeMenuQueuedViewports = {},
 }
 
 function Feature.getConfigStoragePath()
@@ -2776,6 +2781,202 @@ function Feature.attachAntiAfk()
         Feature.pulseAntiAfk(idleTime)
     end)
     Maid:add(Feature.antiAfkConnection)
+end
+
+function Feature.getNativeMenuRootNames()
+    return { "Inventory", "Inventory_Old", "Clone", "Selection" }
+end
+
+function Feature.getNativeMenuFrameRoot()
+    local mainUi = PlayerGui:FindFirstChild("MainUI")
+    return mainUi and mainUi:FindFirstChild("Frames") or nil
+end
+
+function Feature.getNativeMenuRoots()
+    local roots = {}
+    local frames = Feature.getNativeMenuFrameRoot()
+    if not frames then
+        return roots
+    end
+
+    for _, name in ipairs(Feature.getNativeMenuRootNames()) do
+        local root = frames:FindFirstChild(name)
+        if root then
+            table.insert(roots, root)
+        end
+    end
+    return roots
+end
+
+function Feature.findAncestorViewport(instance)
+    local current = instance
+    while current and current ~= PlayerGui do
+        if current:IsA("ViewportFrame") then
+            return current
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+function Feature.stopNativePreviewTracks(animationOwner)
+    if not animationOwner or not animationOwner.GetPlayingAnimationTracks then
+        return
+    end
+
+    local ok, tracks = pcall(function()
+        return animationOwner:GetPlayingAnimationTracks()
+    end)
+    if not ok or type(tracks) ~= "table" then
+        return
+    end
+
+    for _, track in ipairs(tracks) do
+        pcall(function()
+            track:Stop(0)
+        end)
+    end
+end
+
+function Feature.freezeNativePreviewViewport(viewport)
+    if not Config.flags.optimizeNativeMenus or not viewport or not viewport:IsA("ViewportFrame") then
+        return false
+    end
+
+    local worldModel = viewport:FindFirstChild("WorldModel")
+    if not worldModel then
+        return false
+    end
+
+    viewport:SetAttribute("SaltHubStaticPreview", true)
+    for _, descendant in ipairs(worldModel:GetDescendants()) do
+        if descendant:IsA("LocalScript") then
+            pcall(function()
+                descendant.Disabled = true
+            end)
+        elseif descendant:IsA("BasePart") then
+            pcall(function()
+                descendant.Anchored = true
+            end)
+        elseif descendant:IsA("Humanoid") or descendant:IsA("Animator") or descendant:IsA("AnimationController") then
+            Feature.stopNativePreviewTracks(descendant)
+        end
+    end
+
+    return true
+end
+
+function Feature.queueNativePreviewViewport(viewport)
+    if viewport and viewport:IsA("ViewportFrame") then
+        Feature.nativeMenuQueuedViewports[viewport] = true
+    end
+end
+
+function Feature.queueNativeMenuRoot(Root)
+    if not Root then
+        return
+    end
+
+    for _, descendant in ipairs(Root:GetDescendants()) do
+        if descendant:IsA("ViewportFrame") then
+            Feature.queueNativePreviewViewport(descendant)
+        end
+    end
+end
+
+function Feature.attachNativeMenuRoot(Root)
+    if not Root or Feature.nativeMenuRootConnections[Root] then
+        return
+    end
+
+    Feature.queueNativeMenuRoot(Root)
+    local connection = Root.DescendantAdded:Connect(function(descendant)
+        if not Config.flags.optimizeNativeMenus then
+            return
+        end
+
+        local viewport = descendant:IsA("ViewportFrame") and descendant or Feature.findAncestorViewport(descendant)
+        if not viewport then
+            return
+        end
+
+        Feature.queueNativePreviewViewport(viewport)
+        task.defer(function()
+            Feature.queueNativePreviewViewport(viewport)
+        end)
+        task.delay(0.15, function()
+            Feature.queueNativePreviewViewport(viewport)
+        end)
+    end)
+    Feature.nativeMenuRootConnections[Root] = connection
+    Maid:add(connection)
+end
+
+function Feature.refreshNativeMenuOptimizerRoots()
+    for _, root in ipairs(Feature.getNativeMenuRoots()) do
+        Feature.attachNativeMenuRoot(root)
+    end
+end
+
+function Feature.processNativePreviewQueue(limit)
+    local budget = math.max(tonumber(limit) or Config.safety.nativePreviewBatch or 12, 1)
+    local processed = 0
+
+    for viewport in pairs(Feature.nativeMenuQueuedViewports) do
+        Feature.nativeMenuQueuedViewports[viewport] = nil
+        if viewport and viewport.Parent then
+            Feature.freezeNativePreviewViewport(viewport)
+        end
+        processed += 1
+        if processed >= budget then
+            break
+        end
+    end
+
+    return processed
+end
+
+function Feature.optimizeNativeMenuPreviews(limit)
+    if not Config.flags.optimizeNativeMenus then
+        return 0
+    end
+
+    Feature.refreshNativeMenuOptimizerRoots()
+    return Feature.processNativePreviewQueue(limit)
+end
+
+function Feature.attachNativeMenuOptimizer()
+    if Feature.nativeMenuOptimizerConnection then
+        return
+    end
+
+    local lastRootRefresh = 0
+    Feature.nativeMenuOptimizerConnection = RunService.Heartbeat:Connect(function()
+        if not Config.flags.optimizeNativeMenus then
+            return
+        end
+
+        local now = os.clock()
+        if now - lastRootRefresh >= 1 then
+            lastRootRefresh = now
+            Feature.refreshNativeMenuOptimizerRoots()
+        end
+
+        Feature.processNativePreviewQueue(Config.safety.nativePreviewBatch)
+    end)
+    Maid:add(Feature.nativeMenuOptimizerConnection)
+    Feature.optimizeNativeMenuPreviews(Config.safety.nativePreviewBatch)
+end
+
+function Feature.setNativeMenuOptimizerEnabled(value)
+    Config.flags.optimizeNativeMenus = value == true
+    if Config.flags.optimizeNativeMenus then
+        Feature.attachNativeMenuOptimizer()
+        Feature.optimizeNativeMenuPreviews(Config.safety.nativePreviewBatch)
+        Log.push("Native menu optimizer enabled.")
+    else
+        Log.push("Native menu optimizer disabled.")
+    end
 end
 
 function Feature.getDataClient()
@@ -7761,6 +7962,9 @@ local Tabs = {
             UI.toggle(ui, "Anti-AFK", function()
                 return Config.flags.antiAfk
             end, Feature.setAntiAfkEnabled)
+            UI.toggle(ui, "Optimize Native Menus", function()
+                return Config.flags.optimizeNativeMenus
+            end, Feature.setNativeMenuOptimizerEnabled)
             UI.slider(ui, "Anti-AFK Interval", function()
                 return Config.delays.antiAfkCooldown
             end, function(value)
@@ -7781,6 +7985,7 @@ local Tabs = {
 function SaltHub.Start()
     Feature.attachAntiAfk()
     Feature.startAntiAfkLoop()
+    Feature.attachNativeMenuOptimizer()
     Feature.attachEventUiTracker()
     State.loadSharedInfo()
     State.scanUnits()

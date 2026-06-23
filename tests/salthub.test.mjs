@@ -249,6 +249,31 @@ test("anti afk interval starts a periodic pulse loop before Roblox idled fires",
   assert.match(startBody, /Feature\.startAntiAfkLoop\(\)/);
 });
 
+test("native menu optimizer freezes anime preview viewports in game menus", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /optimizeNativeMenus = true/);
+  assert.match(source, /nativePreviewBatch = 12/);
+  assert.match(source, /function Feature\.freezeNativePreviewViewport/);
+  assert.match(source, /function Feature\.optimizeNativeMenuPreviews/);
+  assert.match(source, /function Feature\.attachNativeMenuOptimizer/);
+  assert.match(source, /function Feature\.setNativeMenuOptimizerEnabled/);
+  assert.match(source, /"Inventory",\s*"Inventory_Old",\s*"Clone",\s*"Selection"/);
+  assert.match(source, /descendant:IsA\("ViewportFrame"\)/);
+  assert.match(source, /worldModel = viewport:FindFirstChild\("WorldModel"\)/);
+  assert.match(source, /descendant:IsA\("LocalScript"\)/);
+  assert.match(source, /descendant\.Disabled = true/);
+  assert.match(source, /descendant:IsA\("BasePart"\)/);
+  assert.match(source, /descendant\.Anchored = true/);
+  assert.match(source, /GetPlayingAnimationTracks\(\)/);
+  assert.match(source, /track:Stop\(0\)/);
+  assert.match(source, /Root\.DescendantAdded:Connect/);
+  assert.match(source, /UI\.toggle\(ui, "Optimize Native Menus"/);
+
+  const startBody = source.match(/function SaltHub\.Start\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(startBody, /Feature\.attachNativeMenuOptimizer\(\)/);
+});
+
 test("anti afk responds to idle with throttled virtual input", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
