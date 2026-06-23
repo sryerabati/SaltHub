@@ -173,14 +173,15 @@ local Config = {
         maxLevel = 30,
     },
     buhara = {
-        foodNames = { "Steak", "Tomato", "Bread", "Cheese", "Lettuce" },
-        feedTargetNames = { "Buhara", "BuharaEvent" },
+        foodNames = { "Steak", "Tomato", "Bread", "Cheese", "Lettuce", "Trait Shard" },
+        feedTargetNames = { "Buhara", "Burah", "BURAH", "BuharaEvent" },
         foodCollectDistance = 2.2,
         feedDistance = 1.1,
         teleportOffset = 1.35,
         collectRetries = 3,
         feedRetries = 3,
         scanInterval = 0.65,
+        dropInterval = 1.5,
         maxScanItems = 450,
     },
 }
@@ -788,6 +789,7 @@ local State = {
     buharaFoodScanAt = 0,
     buharaTarget = nil,
     buharaTargetScanAt = 0,
+    buharaDropAt = 0,
     lastBestLineupSummary = "",
     configSaveQueued = false,
     configSaveReason = nil,
@@ -7498,9 +7500,15 @@ function Feature.getBuharaGuiSlots()
         local itemName = slot:FindFirstChild("ItemName", true)
         local quantity = slot:FindFirstChild("Quantity", true)
         if itemName and quantity and itemName:IsA("TextLabel") and quantity:IsA("TextLabel") then
+            local current, required = tostring(quantity.Text or ""):match("(%d+)%s*/%s*(%d+)")
+            current = tonumber(current)
+            required = tonumber(required)
             table.insert(slots, {
                 name = itemName.Text,
                 quantity = quantity.Text,
+                current = current,
+                required = required,
+                complete = current ~= nil and required ~= nil and required > 0 and current >= required,
             })
         end
     end
@@ -7520,13 +7528,55 @@ function Feature.getBuharaWantedFoods(data)
 
     if #wanted == 0 then
         for _, slot in ipairs(Feature.getBuharaGuiSlots()) do
-            if tostring(slot.quantity or ""):match("^%s*0%s*/") then
+            if slot.complete ~= true then
                 table.insert(wanted, slot.name)
             end
         end
     end
 
     return uniqueSorted(wanted)
+end
+
+function Feature.areBuharaRequirementsReady(data)
+    local foodNeeded = type(data) == "table" and data.FoodNeeded or nil
+    if type(foodNeeded) == "table" then
+        local sawRequirement = false
+        for _, missing in pairs(foodNeeded) do
+            sawRequirement = true
+            if missing == true then
+                return false
+            end
+        end
+        if sawRequirement then
+            return true
+        end
+    end
+
+    local slots = Feature.getBuharaGuiSlots()
+    if #slots == 0 then
+        return false
+    end
+
+    for _, slot in ipairs(slots) do
+        if slot.complete ~= true then
+            return false
+        end
+    end
+    return true
+end
+
+function Feature.dropBuharaFoodIfReady(data)
+    if Feature.isCarryingBuharaFood() or not Feature.areBuharaRequirementsReady(data) then
+        return false
+    end
+
+    local interval = math.max(tonumber(Config.buhara.dropInterval) or 1.5, 0.5)
+    if os.clock() - (State.buharaDropAt or 0) < interval then
+        return false
+    end
+
+    State.buharaDropAt = os.clock()
+    return Remote.fire("BuharaDropFood")
 end
 
 function Feature.getBuharaCanonicalFoodName(value)
@@ -7881,6 +7931,13 @@ function Feature.autoBuharaStep()
     end
 
     local data = Feature.getBuharaData()
+    if Feature.dropBuharaFoodIfReady(data) then
+        task.wait(0.2)
+        if Feature.isCarryingBuharaFood() then
+            return Feature.feedBuhara()
+        end
+    end
+
     local wantedFoods = Feature.getBuharaWantedFoods(data)
     if #wantedFoods == 0 then
         return false

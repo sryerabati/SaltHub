@@ -1240,11 +1240,15 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /buhara = \{/);
-  assert.match(source, /foodNames = \{ "Steak", "Tomato", "Bread", "Cheese", "Lettuce" \}/);
+  assert.match(source, /foodNames = \{ "Steak", "Tomato", "Bread", "Cheese", "Lettuce", "Trait Shard" \}/);
+  assert.match(source, /feedTargetNames = \{ "Buhara", "Burah", "BURAH", "BuharaEvent" \}/);
   assert.match(source, /feedDistance = 1\.1/);
   assert.match(source, /scanInterval = 0\.65/);
+  assert.match(source, /dropInterval = 1\.5/);
   assert.match(source, /function Feature\.getBuharaData/);
   assert.match(source, /function Feature\.getBuharaWantedFoods/);
+  assert.match(source, /function Feature\.areBuharaRequirementsReady/);
+  assert.match(source, /function Feature\.dropBuharaFoodIfReady/);
   assert.match(source, /function Feature\.getBuharaFoodName/);
   assert.match(source, /function Feature\.getBuharaScanRoots/);
   assert.match(source, /function Feature\.refreshBuharaFoodDropCache/);
@@ -1261,6 +1265,9 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /FoodNeeded/);
   assert.match(source, /CarryingFood/);
   assert.match(source, /quantity\.Text/);
+  assert.match(source, /slot\.complete ~= true/);
+  assert.match(source, /Remote\.fire\("BuharaDropFood"\)/);
+  assert.match(source, /Feature\.dropBuharaFoodIfReady\(data\)/);
   assert.match(source, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
   assert.match(source, /local prompt = Feature\.getBuharaFeedPrompt\(target\)/);
   assert.match(source, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
@@ -1272,6 +1279,10 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.doesNotMatch(buharaToggle, /Remote\.fire\("BuharaDropFood"\)/);
   const feedBody = source.match(/function Feature\.feedBuhara\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(feedBody, /Remote\.fire\("BuharaDropFood"\)/);
+  const dropBody = source.match(/function Feature\.dropBuharaFoodIfReady\(data\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(dropBody, /Feature\.isCarryingBuharaFood\(\)/);
+  assert.match(dropBody, /Feature\.areBuharaRequirementsReady\(data\)/);
+  assert.match(dropBody, /State\.buharaDropAt/);
   const buharaBody = source.match(/function Feature\.getBuharaData\(\)([\s\S]*?)function Feature\.toggleBuhara/)?.[1] ?? "";
   assert.match(buharaBody, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
   assert.doesNotMatch(buharaBody, /for _, instance in ipairs\(workspace:GetDescendants\(\)\) do[\s\S]*?local foodName = Feature\.getBuharaFoodName\(instance\)/);
