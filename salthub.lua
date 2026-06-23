@@ -3180,6 +3180,19 @@ function Feature.setAutoFastForward(value)
     end
 end
 
+function Feature.setAutoSpin(value)
+    Config.flags.autoSpin = value
+    if value then
+        Feature.startLoop("autoSpin", function()
+            return Config.delays.event
+        end, function()
+            Remote.fire("SpinWheel")
+        end)
+    else
+        Feature.stopLoop("autoSpin")
+    end
+end
+
 function Feature.getRollPrompt()
     local plot = Feature.getOwnedPlot()
     local roll = plot and plot:FindFirstChild("Roll")
@@ -4149,6 +4162,9 @@ function Feature.toggleAutoBuy(value)
 end
 
 function Feature.startLoadedAutomationSettings()
+    if Config.flags.antiAfk then
+        Feature.setAntiAfkEnabled(true)
+    end
     if Config.flags.autoStartWave then
         Feature.setAutoStartWave(true)
     end
@@ -4160,6 +4176,24 @@ function Feature.startLoadedAutomationSettings()
     end
     if Config.flags.autoBuy then
         Feature.toggleAutoBuy(true)
+    end
+    if Config.flags.autoMerge then
+        Feature.toggleAutoMerge(true)
+    end
+    if Config.flags.autoTrait then
+        Feature.toggleTrait(true)
+    end
+    if Config.flags.autoUpgrade then
+        Feature.toggleUpgrade(true)
+    end
+    if Config.flags.autoBuhara then
+        Feature.toggleBuhara(true)
+    end
+    if Config.flags.autoBattlepass then
+        Feature.toggleBattlepass(true)
+    end
+    if Config.flags.autoSpin then
+        Feature.setAutoSpin(true)
     end
 end
 
@@ -7684,18 +7718,7 @@ local Tabs = {
             local spin = UI.section(page, "Spin Wheel")
             UI.toggle(spin, "Auto Spin Wheel", function()
                 return Config.flags.autoSpin
-            end, function(value)
-                Config.flags.autoSpin = value
-                if value then
-                    Feature.startLoop("autoSpin", function()
-                        return Config.delays.event
-                    end, function()
-                        Remote.fire("SpinWheel")
-                    end)
-                else
-                    Feature.stopLoop("autoSpin")
-                end
-            end)
+            end, Feature.setAutoSpin)
 
             local misc = UI.section(page, "Rewards")
             UI.toggle(misc, "Auto Battlepass Claim", function()

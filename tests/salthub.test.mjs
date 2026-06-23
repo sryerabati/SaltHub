@@ -170,6 +170,33 @@ test("SaltHub loads passively by default", () => {
   assert.doesNotMatch(source, /Dry run/);
 });
 
+test("saved automation switches start their actions on load", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  const expectedStartupActions = [
+    ["antiAfk", "Feature.setAntiAfkEnabled(true)"],
+    ["autoStartWave", "Feature.setAutoStartWave(true)"],
+    ["autoFastForward", "Feature.setAutoFastForward(true)"],
+    ["autoRoll", "Feature.toggleAutoRoll(true)"],
+    ["autoBuy", "Feature.toggleAutoBuy(true)"],
+    ["autoMerge", "Feature.toggleAutoMerge(true)"],
+    ["autoTrait", "Feature.toggleTrait(true)"],
+    ["autoUpgrade", "Feature.toggleUpgrade(true)"],
+    ["autoBuhara", "Feature.toggleBuhara(true)"],
+    ["autoBattlepass", "Feature.toggleBattlepass(true)"],
+    ["autoSpin", "Feature.setAutoSpin(true)"],
+  ];
+
+  assert.match(source, /function Feature\.setAutoSpin\(value\)/);
+  assert.match(source, /UI\.toggle\(spin, "Auto Spin Wheel"[\s\S]*?end, Feature\.setAutoSpin\)/);
+  assert.match(source, /Feature\.startLoadedAutomationSettings\(\)/);
+
+  for (const [flag, action] of expectedStartupActions) {
+    assert.match(startupBody, new RegExp(`if Config\\.flags\\.${flag} then\\s+${action.replace(/[().]/g, "\\$&")}`));
+  }
+});
+
 test("anti afk is enabled by default and user-toggleable in settings", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
