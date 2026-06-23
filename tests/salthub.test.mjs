@@ -275,7 +275,7 @@ test("anti afk interval starts a periodic pulse loop before Roblox idled fires",
 test("native menu optimizer freezes or hides preview viewports across game menus", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
-  assert.match(source, /optimizeNativeMenus = true/);
+  assert.match(source, /optimizeNativeMenus = false/);
   assert.match(source, /nativePreviewBatch = 12/);
   assert.match(source, /nativePreviewMode = "Static"/);
   assert.match(source, /function Feature\.freezeNativePreviewViewport/);
@@ -285,6 +285,8 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /function Feature\.optimizeNativeMenuPreviews/);
   assert.match(source, /function Feature\.attachNativeMenuOptimizer/);
   assert.match(source, /function Feature\.setNativeMenuOptimizerEnabled/);
+  assert.match(source, /function applyNativeMenuOptimizerSafetyDefaults/);
+  assert.match(source, /Config\.flags\.optimizeNativeMenus = false/);
   assert.match(source, /"Inventory",[\s\S]*"Inventory_Old",[\s\S]*"Clone",[\s\S]*"Selection",[\s\S]*"Shop",[\s\S]*"Index"/);
   assert.match(source, /descendant:IsA\("ViewportFrame"\)/);
   assert.match(source, /worldModel = viewport:FindFirstChild\("WorldModel"\)/);
@@ -303,7 +305,19 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /return \{ "Static", "Hide" \}/);
 
   const startBody = source.match(/function SaltHub\.Start\(\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(startBody, /Feature\.attachNativeMenuOptimizer\(\)/);
+  assert.match(startBody, /if Config\.flags\.optimizeNativeMenus then[\s\S]*Feature\.attachNativeMenuOptimizer\(\)/);
+});
+
+test("native menu optimizer avoids descendant task storms when native menus build models", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const attachBody = source.match(/function Feature\.attachNativeMenuRoot\(Root\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(attachBody, /descendant:IsA\("ViewportFrame"\)/);
+  assert.match(attachBody, /descendant:IsA\("WorldModel"\)/);
+  assert.match(attachBody, /descendant\.Parent:IsA\("ViewportFrame"\)/);
+  assert.doesNotMatch(attachBody, /Feature\.findAncestorViewport\(descendant\)/);
+  assert.doesNotMatch(attachBody, /task\.defer/);
+  assert.doesNotMatch(attachBody, /task\.delay/);
 });
 
 test("anti afk responds to idle with throttled virtual input", () => {

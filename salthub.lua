@@ -82,7 +82,7 @@ local Config = {
         autoUpgrade = false,
         autoBuhara = false,
         autoBattlepass = false,
-        optimizeNativeMenus = true,
+        optimizeNativeMenus = false,
     },
     wave = {
         fastForward = "x2",
@@ -246,6 +246,10 @@ local function applyBestLineupOptimizerDefaults()
     best.searchVariants = math.max(tonumber(best.searchVariants) or 0, 5)
 end
 
+local function applyNativeMenuOptimizerSafetyDefaults()
+    Config.flags.optimizeNativeMenus = false
+end
+
 local workspaceConfigLoaded = false
 local workspaceConfigStatus = nil
 
@@ -391,6 +395,7 @@ if presetApplied and savedConfigApplied then
     workspaceConfigStatus = tostring(workspaceConfigStatus) .. " (overrode launch preset)"
 end
 applyBestLineupOptimizerDefaults()
+applyNativeMenuOptimizerSafetyDefaults()
 
 local Maid = { items = {} }
 function Maid:add(item)
@@ -3015,18 +3020,18 @@ function Feature.attachNativeMenuRoot(Root)
             return
         end
 
-        local viewport = descendant:IsA("ViewportFrame") and descendant or Feature.findAncestorViewport(descendant)
+        local viewport = nil
+        if descendant:IsA("ViewportFrame") then
+            viewport = descendant
+        elseif descendant:IsA("WorldModel") and descendant.Parent and descendant.Parent:IsA("ViewportFrame") then
+            viewport = descendant.Parent
+        end
+
         if not viewport then
             return
         end
 
         Feature.queueNativePreviewViewport(viewport)
-        task.defer(function()
-            Feature.queueNativePreviewViewport(viewport)
-        end)
-        task.delay(0.15, function()
-            Feature.queueNativePreviewViewport(viewport)
-        end)
     end)
     Feature.nativeMenuRootConnections[Root] = connection
     Maid:add(connection)
@@ -8397,7 +8402,9 @@ local Tabs = {
 function SaltHub.Start()
     Feature.attachAntiAfk()
     Feature.startAntiAfkLoop()
-    Feature.attachNativeMenuOptimizer()
+    if Config.flags.optimizeNativeMenus then
+        Feature.attachNativeMenuOptimizer()
+    end
     Feature.attachEventUiTracker()
     State.loadSharedInfo()
     State.scanUnits()
