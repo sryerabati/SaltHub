@@ -49,7 +49,7 @@ local Config = {
     safety = {
         remoteCooldown = 0.35,
         nativePreviewBatch = 12,
-        nativePreviewMode = "Static",
+        nativePreviewMode = "Hide",
     },
     delays = {
         wave = 1.5,
@@ -249,6 +249,10 @@ end
 
 local function applyNativeMenuOptimizerSafetyDefaults()
     Config.flags.optimizeNativeMenus = false
+    local mode = tostring(Config.safety.nativePreviewMode or ""):lower():gsub("%s+", "")
+    if mode == "" or mode == "static" then
+        Config.safety.nativePreviewMode = "Hide"
+    end
 end
 
 local workspaceConfigLoaded = false
@@ -1599,6 +1603,20 @@ function UI.setGlassEnabled(enabled)
     end
 end
 
+function UI.isVisible(instance)
+    local current = instance
+    while current do
+        if current:IsA("GuiObject") and current.Visible == false then
+            return false
+        end
+        if current == UI.root then
+            return true
+        end
+        current = current.Parent
+    end
+    return false
+end
+
 function UI.build()
     local gui = inst("ScreenGui", {
         Name = Config.ui.guiName,
@@ -1897,8 +1915,11 @@ function UI.cycle(parent, title, options, getter, setter)
             Feature.scheduleConfigSave("ui:" .. tostring(title))
         end
     end)
+    local lastUpdate = 0
     Maid:add(RunService.Heartbeat:Connect(function()
-        if button and button.Parent then
+        local now = os.clock()
+        if button and button.Parent and UI.isVisible(button) and now - lastUpdate >= 0.25 then
+            lastUpdate = now
             button.Text = title .. ": " .. tostring(getter() or "-")
         end
     end))
@@ -1990,8 +2011,11 @@ function UI.slider(parent, title, getter, setter, minValue, maxValue, stepValue)
             setFromPosition(input.Position.X)
         end
     end))
+    local lastRedraw = 0
     Maid:add(RunService.Heartbeat:Connect(function()
-        if frame and frame.Parent then
+        local now = os.clock()
+        if frame and frame.Parent and UI.isVisible(frame) and now - lastRedraw >= 0.25 then
+            lastRedraw = now
             redraw()
         end
     end))
@@ -2110,7 +2134,24 @@ function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, 
     layout.Parent = list
     list.Parent = frame
 
-    local function refresh()
+    local lastSignature = nil
+    local function getSignature(units)
+        local parts = { tostring(selectedIdGetter() or ""), tostring(#(units or {})) }
+        for _, unit in ipairs(units or {}) do
+            table.insert(parts, table.concat({
+                tostring(unit and unit.id or ""),
+                tostring(unit and unit.name or ""),
+                tostring(unit and unit.mutation or ""),
+                tostring(unit and unit.level or ""),
+                tostring(unit and unit.trait or ""),
+            }, "|"))
+        end
+        return table.concat(parts, "\n")
+    end
+
+    local function refresh(units)
+        units = units or unitsGetter() or {}
+        lastSignature = getSignature(units)
         for _, child in ipairs(list:GetChildren()) do
             if child ~= layout then
                 child:Destroy()
@@ -2118,7 +2159,7 @@ function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, 
         end
 
         local selectedId = tostring(selectedIdGetter() or "")
-        for index, unit in ipairs(unitsGetter() or {}) do
+        for index, unit in ipairs(units) do
             local rarity = State.traitRarity[unit.trait] or TRAIT_RARITY_FALLBACK[unit.trait] or "Common"
             local traitColor = rarityColor(rarity)
             local selected = tostring(unit.id) == selectedId
@@ -2155,9 +2196,14 @@ function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, 
     refresh()
     local lastRefresh = 0
     Maid:add(RunService.Heartbeat:Connect(function()
-        if list and list.Parent and os.clock() - lastRefresh >= 1.25 then
-            lastRefresh = os.clock()
-            refresh()
+        local now = os.clock()
+        if list and list.Parent and UI.isVisible(list) and now - lastRefresh >= 1.25 then
+            lastRefresh = now
+            local units = unitsGetter() or {}
+            local signature = getSignature(units)
+            if signature ~= lastSignature then
+                refresh(units)
+            end
         end
     end))
     return {
@@ -5701,21 +5747,7 @@ function Feature.buildBestLineupCandidates(includeEquipped)
         addFrom(byDps, limit)
     end
 
-    table.sort(candidates, function(a, b)
-        if a.tierScore ~= b.tierScore then
-            return a.tierScore > b.tierScore
-        end
-        if a.derived.dps ~= b.derived.dps then
-            return a.derived.dps > b.derived.dps
-        end
-        if a.scorePerSpot ~= b.scorePerSpot then
-            return a.scorePerSpot > b.scorePerSpot
-        end
-        if a.score ~= b.score then
-            return a.score > b.score
-        end
-        return tostring(a.unit.id) < tostring(b.unit.id)
-    end)
+    candidates = Feature.sortLineupCandidatesByCombat(candidates)
     return candidates, allCandidates
 end
 
@@ -5859,6 +5891,61 @@ function Feature.getLineupRangeOrderScore(plan)
     end
 
     return -penalty
+end
+
+function Feature.sortLineupCandidatesByCombat(candidates)
+    local ordered = copyArray(candidates or {})
+    table.sort(ordered, function(a, b)
+        if a.score ~= b.score then
+            return a.score > b.score
+        end
+        local dpsA = tonumber(a and a.derived and a.derived.dps) or 0
+        local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
+        if dpsA ~= dpsB then
+            return dpsA > dpsB
+        end
+        local damageA = tonumber(a and a.derived and a.derived.damage) or 0
+        local damageB = tonumber(b and b.derived and b.derived.damage) or 0
+        if damageA ~= damageB then
+            return damageA > damageB
+        end
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
+        if a.scorePerSpot ~= b.scorePerSpot then
+            return a.scorePerSpot > b.scorePerSpot
+        end
+        return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
+    end)
+    return ordered
+end
+
+function Feature.orderBestLineupPlanForPlacement(plan)
+    local ordered = copyArray(plan or {})
+    table.sort(ordered, function(a, b)
+        local scoreA = tonumber(a and a.score) or 0
+        local scoreB = tonumber(b and b.score) or 0
+        if scoreA ~= scoreB then
+            return scoreA > scoreB
+        end
+        local dpsA = tonumber(a and a.derived and a.derived.dps) or 0
+        local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
+        if dpsA ~= dpsB then
+            return dpsA > dpsB
+        end
+        local damageA = tonumber(a and a.derived and a.derived.damage) or 0
+        local damageB = tonumber(b and b.derived and b.derived.damage) or 0
+        if damageA ~= damageB then
+            return damageA > damageB
+        end
+        local rangeA = tonumber(a and a.derived and a.derived.range) or 0
+        local rangeB = tonumber(b and b.derived and b.derived.range) or 0
+        if rangeA ~= rangeB then
+            return rangeA < rangeB
+        end
+        return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
+    end)
+    return ordered
 end
 
 function Feature.sortLineupCandidatesByTier(candidates)
@@ -6249,7 +6336,7 @@ function Feature.getBestLineupCandidateOrderVariants(candidates)
         table.insert(variants, ordered)
     end
 
-    addVariant(candidates)
+    addVariant(Feature.sortLineupCandidatesByCombat(candidates))
     addVariant(Feature.sortLineupCandidatesByTier(candidates))
     addVariant(Feature.sortLineupCandidatesByFrontNeed(candidates))
     addVariant(Feature.sortLineupCandidatesByScore(candidates))
@@ -6342,7 +6429,7 @@ function Feature.getBestLineupPlan()
         metrics
     )
     candidates = Feature.prepareBestLineupCandidatePlacements(candidates, cells, gridMap, metrics)
-    return Feature.buildBestLineupMultiVariantPlan(candidates, cells, gridMap, Feature.refreshPlacementOccupancy(gridMap), fillCandidates, metrics)
+    return Feature.orderBestLineupPlanForPlacement(Feature.buildBestLineupMultiVariantPlan(candidates, cells, gridMap, Feature.refreshPlacementOccupancy(gridMap), fillCandidates, metrics))
 end
 
 function Feature.getBestLineupPlanFromEmptyGrid()
@@ -6362,7 +6449,7 @@ function Feature.getBestLineupPlanFromEmptyGrid()
         metrics
     )
     candidates = Feature.prepareBestLineupCandidatePlacements(candidates, cells, gridMap, metrics)
-    return Feature.buildBestLineupMultiVariantPlan(candidates, cells, gridMap, {}, fillCandidates, metrics)
+    return Feature.orderBestLineupPlanForPlacement(Feature.buildBestLineupMultiVariantPlan(candidates, cells, gridMap, {}, fillCandidates, metrics))
 end
 
 function Feature.placeBestLineup()

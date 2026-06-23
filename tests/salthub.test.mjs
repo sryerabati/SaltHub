@@ -277,7 +277,7 @@ test("native menu optimizer freezes or hides preview viewports across game menus
 
   assert.match(source, /optimizeNativeMenus = false/);
   assert.match(source, /nativePreviewBatch = 12/);
-  assert.match(source, /nativePreviewMode = "Static"/);
+  assert.match(source, /nativePreviewMode = "Hide"/);
   assert.match(source, /function Feature\.freezeNativePreviewViewport/);
   assert.match(source, /function Feature\.hideNativePreviewViewport/);
   assert.match(source, /function Feature\.getNativePreviewMode/);
@@ -287,6 +287,7 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /function Feature\.setNativeMenuOptimizerEnabled/);
   assert.match(source, /function applyNativeMenuOptimizerSafetyDefaults/);
   assert.match(source, /Config\.flags\.optimizeNativeMenus = false/);
+  assert.match(source, /Config\.safety\.nativePreviewMode = "Hide"/);
   assert.match(source, /"Inventory",[\s\S]*"Inventory_Old",[\s\S]*"Clone",[\s\S]*"Selection",[\s\S]*"Shop",[\s\S]*"Index"/);
   assert.match(source, /descendant:IsA\("ViewportFrame"\)/);
   assert.match(source, /worldModel = viewport:FindFirstChild\("WorldModel"\)/);
@@ -306,6 +307,24 @@ test("native menu optimizer freezes or hides preview viewports across game menus
 
   const startBody = source.match(/function SaltHub\.Start\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(startBody, /if Config\.flags\.optimizeNativeMenus then[\s\S]*Feature\.attachNativeMenuOptimizer\(\)/);
+});
+
+test("SaltHub GUI avoids hidden selector rebuild churn", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const selectorBody = source.match(/function UI\.inventoryUnitSelector\(parent, title, unitsGetter, selectedIdGetter, setter, height\)([\s\S]*?)\nfunction UI\.traitSelector/)?.[1] ?? "";
+  const cycleBody = source.match(/function UI\.cycle\(parent, title, options, getter, setter\)([\s\S]*?)\nfunction UI\.slider/)?.[1] ?? "";
+  const sliderBody = source.match(/function UI\.slider\(parent, title, getter, setter, minValue, maxValue, stepValue\)([\s\S]*?)\nfunction UI\.multiSelectList/)?.[1] ?? "";
+
+  assert.match(source, /function UI\.isVisible\(instance\)/);
+  assert.match(source, /current:IsA\("GuiObject"\) and current\.Visible == false/);
+  assert.match(selectorBody, /local function getSignature\(units\)/);
+  assert.match(selectorBody, /lastSignature = getSignature\(units\)/);
+  assert.match(selectorBody, /UI\.isVisible\(list\)/);
+  assert.match(selectorBody, /if signature ~= lastSignature then\s+refresh\(units\)/);
+  assert.match(cycleBody, /UI\.isVisible\(button\)/);
+  assert.match(cycleBody, /now - lastUpdate >= 0\.25/);
+  assert.match(sliderBody, /UI\.isVisible\(frame\)/);
+  assert.match(sliderBody, /now - lastRedraw >= 0\.25/);
 });
 
 test("native menu optimizer avoids descendant task storms when native menus build models", () => {
@@ -845,6 +864,25 @@ test("best lineup optimizer makes unit tier dominate filler and compactness math
   assert.match(source, /addFrom\(byTier, math\.max\(1, tonumber\(Config\.bestLineup\.tierCandidateLimit\) or limit\)\)/);
   assert.match(source, /if a\.tierScore ~= b\.tierScore then/);
   assert.match(source, /return a\.tierScore > b\.tierScore/);
+});
+
+test("best lineup places best combat units before range and filler heuristics", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const buildCandidates = source.match(/function Feature\.buildBestLineupCandidates\(includeEquipped\)([\s\S]*?)\nfunction Feature\.getBestLineupFillCandidates/)?.[1] ?? "";
+  const combatSort = source.match(/function Feature\.sortLineupCandidatesByCombat\(candidates\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const variantsBody = source.match(/function Feature\.getBestLineupCandidateOrderVariants\(candidates\)([\s\S]*?)\nfunction Feature\.selectBestLineupPlan/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.sortLineupCandidatesByCombat/);
+  assert.match(source, /function Feature\.orderBestLineupPlanForPlacement/);
+  assert.match(buildCandidates, /Feature\.sortLineupCandidatesByCombat\(candidates\)/);
+  assert.match(combatSort, /if a\.score ~= b\.score then\s+return a\.score > b\.score/);
+  assert.match(combatSort, /if a\.tierScore ~= b\.tierScore then\s+return a\.tierScore > b\.tierScore/);
+  assert.match(variantsBody, /addVariant\(Feature\.sortLineupCandidatesByCombat\(candidates\)\)/);
+  assert.match(variantsBody, /addVariant\(Feature\.sortLineupCandidatesByTier\(candidates\)\)/);
+  assert.match(source, /return Feature\.orderBestLineupPlanForPlacement\(Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates, metrics\)\)/);
+  assert.match(source, /return Feature\.orderBestLineupPlanForPlacement\(Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)\)/);
+  assert.match(source, /Feature\.rebuildBestLineupPlanByRange\(improved, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
+  assert.match(source, /Feature\.fillBestLineupBackfillPlan\(ranged, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
 });
 
 test("best lineup resolves character mutation and trait data through normalized aliases", () => {
