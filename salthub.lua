@@ -2672,6 +2672,7 @@ Feature = {
     antiAfkConnection = nil,
     nativeMenuOptimizerConnection = nil,
     nativeMenuRootConnections = {},
+    nativeVisualEffectRootConnections = {},
     nativeMenuQueuedViewports = {},
     nativeMenuQueuedVisualEffects = {},
 }
@@ -2927,11 +2928,8 @@ function Feature.getNativeMenuRoots()
 end
 
 function Feature.getNativeVisualEffectRoots()
-    local roots = Feature.getNativeMenuRoots()
     local seen = {}
-    for _, root in ipairs(roots) do
-        seen[root] = true
-    end
+    local roots = {}
 
     local mainUi = PlayerGui:FindFirstChild("MainUI")
     if mainUi then
@@ -2996,7 +2994,7 @@ function Feature.freezeNativeVisualEffect(effect)
     effect:SetAttribute("SaltHubFrozenVisualEffect", true)
     if effect:IsA("UIGradient") then
         pcall(function()
-            effect.Enabled = false
+            effect.Enabled = true
         end)
         pcall(function()
             effect.Offset = Vector2.new(0, 0)
@@ -3113,7 +3111,21 @@ function Feature.queueNativePreviewViewport(viewport)
 end
 
 function Feature.queueNativeVisualEffect(effect)
-    if Feature.isNativeVisualEffect(effect) and effect:GetAttribute("SaltHubFrozenVisualEffect") ~= true then
+    if not Feature.isNativeVisualEffect(effect) then
+        return
+    end
+
+    if effect:IsA("UIGradient") then
+        local enabledOk, enabled = pcall(function()
+            return effect.Enabled
+        end)
+        if effect:GetAttribute("SaltHubFrozenVisualEffect") ~= true or (enabledOk and enabled == false) then
+            Feature.nativeMenuQueuedVisualEffects[effect] = true
+        end
+        return
+    end
+
+    if effect:GetAttribute("SaltHubFrozenVisualEffect") ~= true then
         Feature.nativeMenuQueuedVisualEffects[effect] = true
     end
 end
@@ -3175,12 +3187,31 @@ function Feature.attachNativeMenuRoot(Root)
     Maid:add(connection)
 end
 
+function Feature.attachNativeVisualEffectRoot(Root)
+    if not Root or Feature.nativeVisualEffectRootConnections[Root] then
+        return
+    end
+
+    Feature.queueNativeVisualEffectRoot(Root)
+    local connection = Root.DescendantAdded:Connect(function(descendant)
+        if not Config.flags.optimizeNativeMenus then
+            return
+        end
+
+        if Feature.isNativeVisualEffect(descendant) then
+            Feature.queueNativeVisualEffect(descendant)
+        end
+    end)
+    Feature.nativeVisualEffectRootConnections[Root] = connection
+    Maid:add(connection)
+end
+
 function Feature.refreshNativeMenuOptimizerRoots()
     for _, root in ipairs(Feature.getNativeMenuRoots()) do
         Feature.attachNativeMenuRoot(root)
     end
     for _, root in ipairs(Feature.getNativeVisualEffectRoots()) do
-        Feature.queueNativeVisualEffectRoot(root)
+        Feature.attachNativeVisualEffectRoot(root)
     end
 end
 
@@ -3241,7 +3272,7 @@ function Feature.attachNativeMenuOptimizer()
         end
 
         local now = os.clock()
-        if now - lastRootRefresh >= 1 then
+        if now - lastRootRefresh >= 5 then
             lastRootRefresh = now
             Feature.refreshNativeMenuOptimizerRoots()
         end

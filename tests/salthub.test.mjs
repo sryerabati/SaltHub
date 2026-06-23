@@ -284,6 +284,8 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /function Feature\.queueNativeVisualEffect/);
   assert.match(source, /effect:GetAttribute\("SaltHubFrozenVisualEffect"\) ~= true/);
   assert.match(source, /function Feature\.processNativeVisualEffectQueue/);
+  assert.match(source, /nativeVisualEffectRootConnections = \{\}/);
+  assert.match(source, /function Feature\.attachNativeVisualEffectRoot/);
   assert.match(source, /function Feature\.hideNativePreviewViewport/);
   assert.match(source, /function Feature\.getNativePreviewMode/);
   assert.match(source, /function Feature\.setNativePreviewMode/);
@@ -302,8 +304,15 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /descendant\.Anchored = true/);
   assert.match(source, /instance:IsA\("UIGradient"\)/);
   assert.match(source, /effect\.Enabled = false/);
+  assert.match(source, /effect\.Enabled = true/);
   assert.match(source, /effect\.Offset = Vector2\.new\(0, 0\)/);
   assert.match(source, /effect\.Rotation = 0/);
+  const gradientBranch = source.match(/if effect:IsA\("UIGradient"\) then([\s\S]*?)else/)?.[1] ?? "";
+  assert.match(gradientBranch, /effect\.Enabled = true/);
+  assert.doesNotMatch(gradientBranch, /effect\.Enabled = false/);
+  const queueBody = source.match(/function Feature\.queueNativeVisualEffect\(effect\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(queueBody, /effect:IsA\("UIGradient"\)/);
+  assert.match(queueBody, /enabled == false/);
   assert.match(source, /instance:IsA\("ParticleEmitter"\)/);
   assert.match(source, /instance:IsA\("Beam"\)/);
   assert.match(source, /instance:IsA\("Trail"\)/);
@@ -315,6 +324,7 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /worldModel:ClearAllChildren\(\)/);
   assert.match(source, /SaltHubHiddenPreview/);
   assert.match(source, /Root\.DescendantAdded:Connect/);
+  assert.match(source, /now - lastRootRefresh >= 5/);
   assert.match(source, /UI\.toggle\(ui, "Optimize Native Menus"/);
   assert.match(source, /UI\.cycle\(ui, "Native Preview Mode"/);
   assert.match(source, /return \{ "Static", "Hide" \}/);
@@ -344,6 +354,7 @@ test("SaltHub GUI avoids hidden selector rebuild churn", () => {
 test("native menu optimizer avoids descendant task storms when native menus build models", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const attachBody = source.match(/function Feature\.attachNativeMenuRoot\(Root\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const refreshBody = source.match(/function Feature\.refreshNativeMenuOptimizerRoots\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(attachBody, /descendant:IsA\("ViewportFrame"\)/);
   assert.match(attachBody, /descendant:IsA\("WorldModel"\)/);
@@ -353,6 +364,8 @@ test("native menu optimizer avoids descendant task storms when native menus buil
   assert.doesNotMatch(attachBody, /Feature\.findAncestorViewport\(descendant\)/);
   assert.doesNotMatch(attachBody, /task\.defer/);
   assert.doesNotMatch(attachBody, /task\.delay/);
+  assert.match(refreshBody, /Feature\.attachNativeVisualEffectRoot\(root\)/);
+  assert.doesNotMatch(refreshBody, /Feature\.queueNativeVisualEffectRoot\(root\)/);
 });
 
 test("anti afk responds to idle with throttled virtual input", () => {
