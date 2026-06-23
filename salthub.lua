@@ -48,6 +48,7 @@ local Config = {
     },
     safety = {
         remoteCooldown = 0.35,
+        nativeRootScanBatch = 96,
         nativePreviewBatch = 12,
         nativeVisualEffectBatch = 256,
         nativePreviewMode = "Hide",
@@ -2676,6 +2677,7 @@ Feature = {
     nativeMenuOptimizerConnection = nil,
     nativeMenuRootConnections = {},
     nativeVisualEffectRootConnections = {},
+    nativeMenuQueuedRootScans = {},
     nativeMenuQueuedViewports = {},
     nativeMenuQueuedVisualEffects = {},
 }
@@ -3133,19 +3135,44 @@ function Feature.queueNativeVisualEffect(effect)
     end
 end
 
+function Feature.inspectNativeMenuDescendant(descendant)
+    if not descendant then
+        return
+    end
+
+    if descendant:IsA("ViewportFrame") then
+        Feature.queueNativePreviewViewport(descendant)
+    elseif descendant:IsA("WorldModel") and descendant.Parent and descendant.Parent:IsA("ViewportFrame") then
+        Feature.queueNativePreviewViewport(descendant.Parent)
+    end
+
+    if Feature.isNativeVisualEffect(descendant) then
+        Feature.queueNativeVisualEffect(descendant)
+    end
+end
+
+function Feature.queueNativeRootScan(Root)
+    if not Root then
+        return
+    end
+
+    local pending = Feature.nativeMenuQueuedRootScans[Root]
+    if pending and pending.root == Root then
+        return
+    end
+
+    Feature.nativeMenuQueuedRootScans[Root] = {
+        root = Root,
+        stack = { Root },
+    }
+end
+
 function Feature.queueNativeMenuRoot(Root)
     if not Root then
         return
     end
 
-    for _, descendant in ipairs(Root:GetDescendants()) do
-        if descendant:IsA("ViewportFrame") then
-            Feature.queueNativePreviewViewport(descendant)
-        end
-        if Feature.isNativeVisualEffect(descendant) then
-            Feature.queueNativeVisualEffect(descendant)
-        end
-    end
+    Feature.queueNativeRootScan(Root)
 end
 
 function Feature.queueNativeVisualEffectRoot(Root)
@@ -3165,26 +3192,13 @@ function Feature.attachNativeMenuRoot(Root)
         return
     end
 
-    Feature.queueNativeMenuRoot(Root)
+    Feature.queueNativeRootScan(Root)
     local connection = Root.DescendantAdded:Connect(function(descendant)
         if not Config.flags.optimizeNativeMenus then
             return
         end
 
-        local viewport = nil
-        if descendant:IsA("ViewportFrame") then
-            viewport = descendant
-        elseif descendant:IsA("WorldModel") and descendant.Parent and descendant.Parent:IsA("ViewportFrame") then
-            viewport = descendant.Parent
-        end
-
-        if viewport then
-            Feature.queueNativePreviewViewport(viewport)
-        end
-
-        if Feature.isNativeVisualEffect(descendant) then
-            Feature.queueNativeVisualEffect(descendant)
-        end
+        Feature.inspectNativeMenuDescendant(descendant)
     end)
     Feature.nativeMenuRootConnections[Root] = connection
     Maid:add(connection)
@@ -3246,6 +3260,47 @@ function Feature.pauseMergeForNativeMenu(now)
     return true
 end
 
+function Feature.processNativeRootScanQueue(limit)
+    local budget = math.max(tonumber(limit) or Config.safety.nativeRootScanBatch or 96, 1)
+    local processed = 0
+
+    for root, scan in pairs(Feature.nativeMenuQueuedRootScans) do
+        if not root or not root.Parent or type(scan) ~= "table" or scan.root ~= root or type(scan.stack) ~= "table" then
+            Feature.nativeMenuQueuedRootScans[root] = nil
+            continue
+        end
+
+        while processed < budget do
+            local node = table.remove(scan.stack)
+            if not node then
+                Feature.nativeMenuQueuedRootScans[root] = nil
+                break
+            end
+
+            if node ~= root then
+                Feature.inspectNativeMenuDescendant(node)
+            end
+
+            local ok, children = pcall(function()
+                return node:GetChildren()
+            end)
+            if ok and type(children) == "table" then
+                for index = #children, 1, -1 do
+                    table.insert(scan.stack, children[index])
+                end
+            end
+
+            processed += 1
+        end
+
+        if processed >= budget then
+            break
+        end
+    end
+
+    return processed
+end
+
 function Feature.processNativePreviewQueue(limit)
     local budget = math.max(tonumber(limit) or Config.safety.nativePreviewBatch or 12, 1)
     local processed = 0
@@ -3288,7 +3343,9 @@ function Feature.optimizeNativeMenuPreviews(limit)
     end
 
     Feature.refreshNativeMenuOptimizerRoots()
-    return Feature.processNativePreviewQueue(limit) + Feature.processNativeVisualEffectQueue(Config.safety.nativeVisualEffectBatch)
+    return Feature.processNativeRootScanQueue(Config.safety.nativeRootScanBatch)
+        + Feature.processNativePreviewQueue(limit)
+        + Feature.processNativeVisualEffectQueue(Config.safety.nativeVisualEffectBatch)
 end
 
 function Feature.attachNativeMenuOptimizer()
@@ -3308,6 +3365,7 @@ function Feature.attachNativeMenuOptimizer()
             Feature.refreshNativeMenuOptimizerRoots()
         end
 
+        Feature.processNativeRootScanQueue(Config.safety.nativeRootScanBatch)
         Feature.processNativePreviewQueue(Config.safety.nativePreviewBatch)
         Feature.processNativeVisualEffectQueue(Config.safety.nativeVisualEffectBatch)
     end)

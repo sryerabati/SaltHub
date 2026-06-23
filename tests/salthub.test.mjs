@@ -353,14 +353,24 @@ test("SaltHub GUI avoids hidden selector rebuild churn", () => {
 
 test("native menu optimizer avoids descendant task storms when native menus build models", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const inspectBody = source.match(/function Feature\.inspectNativeMenuDescendant\(descendant\)([\s\S]*?)\nend/)?.[1] ?? "";
   const attachBody = source.match(/function Feature\.attachNativeMenuRoot\(Root\)([\s\S]*?)\nend/)?.[1] ?? "";
   const refreshBody = source.match(/function Feature\.refreshNativeMenuOptimizerRoots\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const heartbeatBody = source.match(/Feature\.nativeMenuOptimizerConnection = RunService\.Heartbeat:Connect\(function\(\)([\s\S]*?)\n    end\)/)?.[1] ?? "";
 
-  assert.match(attachBody, /descendant:IsA\("ViewportFrame"\)/);
-  assert.match(attachBody, /descendant:IsA\("WorldModel"\)/);
-  assert.match(attachBody, /descendant\.Parent:IsA\("ViewportFrame"\)/);
-  assert.match(attachBody, /Feature\.isNativeVisualEffect\(descendant\)/);
-  assert.match(attachBody, /Feature\.queueNativeVisualEffect\(descendant\)/);
+  assert.match(source, /nativeRootScanBatch = 96/);
+  assert.match(source, /nativeMenuQueuedRootScans = \{\}/);
+  assert.match(source, /function Feature\.queueNativeRootScan/);
+  assert.match(source, /function Feature\.processNativeRootScanQueue/);
+  assert.match(source, /Feature\.queueNativeRootScan\(Root\)/);
+  assert.match(heartbeatBody, /Feature\.processNativeRootScanQueue\(Config\.safety\.nativeRootScanBatch\)/);
+  assert.match(inspectBody, /descendant:IsA\("ViewportFrame"\)/);
+  assert.match(inspectBody, /descendant:IsA\("WorldModel"\)/);
+  assert.match(inspectBody, /descendant\.Parent:IsA\("ViewportFrame"\)/);
+  assert.match(inspectBody, /Feature\.isNativeVisualEffect\(descendant\)/);
+  assert.match(inspectBody, /Feature\.queueNativeVisualEffect\(descendant\)/);
+  assert.match(attachBody, /Feature\.inspectNativeMenuDescendant\(descendant\)/);
+  assert.doesNotMatch(attachBody, /Feature\.queueNativeMenuRoot\(Root\)/);
   assert.doesNotMatch(attachBody, /Feature\.findAncestorViewport\(descendant\)/);
   assert.doesNotMatch(attachBody, /task\.defer/);
   assert.doesNotMatch(attachBody, /task\.delay/);
