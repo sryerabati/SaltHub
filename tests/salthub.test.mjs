@@ -254,6 +254,9 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /function Feature\.applyAutoRollSettingsLocal/);
+  assert.match(source, /function Feature\.startLoadedAutomationSettings/);
+  assert.match(source, /if Config\.flags\.autoRoll then\s+Feature\.toggleAutoRoll\(true\)/);
+  assert.match(source, /if Config\.flags\.autoBuy then\s+Feature\.toggleAutoBuy\(true\)/);
   assert.match(source, /function Feature\.getOwnedPlot/);
   assert.match(source, /function Feature\.getRollPrompt/);
   assert.match(source, /function Feature\.getRollStationCFrame/);
@@ -1133,6 +1136,11 @@ test("buhara collection and feeding use direct teleport positioning", () => {
 test("auto start wave is gated by owned plot wave state", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
+  assert.match(source, /function Feature\.setAutoStartWave\(value\)/);
+  assert.match(source, /function Feature\.setAutoFastForward\(value\)/);
+  assert.match(source, /if Config\.flags\.autoStartWave then\s+Feature\.setAutoStartWave\(true\)/);
+  assert.match(source, /if Config\.flags\.autoFastForward then\s+Feature\.setAutoFastForward\(true\)/);
+  assert.match(source, /Feature\.startLoadedAutomationSettings\(\)/);
   assert.match(source, /function Feature\.isWaveStarted/);
   assert.match(source, /function Feature\.shouldStartWave/);
   assert.match(source, /function Feature\.getHighestWaveCheckpoint/);

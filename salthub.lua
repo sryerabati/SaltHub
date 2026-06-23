@@ -3156,6 +3156,30 @@ function Feature.autoStartWaveStep()
     Remote.fire("StartWave")
 end
 
+function Feature.setAutoStartWave(value)
+    Config.flags.autoStartWave = value
+    if value then
+        Feature.startLoop("autoStartWave", function()
+            return Config.delays.wave
+        end, Feature.autoStartWaveStep)
+    else
+        Feature.stopLoop("autoStartWave")
+    end
+end
+
+function Feature.setAutoFastForward(value)
+    Config.flags.autoFastForward = value
+    if value then
+        Feature.startLoop("autoFastForward", function()
+            return Config.delays.wave
+        end, function()
+            Remote.fire("FastForward", Config.wave.fastForward)
+        end)
+    else
+        Feature.stopLoop("autoFastForward")
+    end
+end
+
 function Feature.getRollPrompt()
     local plot = Feature.getOwnedPlot()
     local roll = plot and plot:FindFirstChild("Roll")
@@ -4121,6 +4145,21 @@ function Feature.toggleAutoBuy(value)
     else
         Feature.clearPendingBuy()
         Feature.stopLoop("autoBuy")
+    end
+end
+
+function Feature.startLoadedAutomationSettings()
+    if Config.flags.autoStartWave then
+        Feature.setAutoStartWave(true)
+    end
+    if Config.flags.autoFastForward then
+        Feature.setAutoFastForward(true)
+    end
+    if Config.flags.autoRoll then
+        Feature.toggleAutoRoll(true)
+    end
+    if Config.flags.autoBuy then
+        Feature.toggleAutoBuy(true)
     end
 end
 
@@ -7500,30 +7539,10 @@ local Tabs = {
             local controls = UI.section(page, "Wave Control")
             UI.toggle(controls, "Auto Start Wave", function()
                 return Config.flags.autoStartWave
-            end, function(value)
-                Config.flags.autoStartWave = value
-                if value then
-                    Feature.startLoop("autoStartWave", function()
-                        return Config.delays.wave
-                    end, Feature.autoStartWaveStep)
-                else
-                    Feature.stopLoop("autoStartWave")
-                end
-            end)
+            end, Feature.setAutoStartWave)
             UI.toggle(controls, "Auto Fast Forward", function()
                 return Config.flags.autoFastForward
-            end, function(value)
-                Config.flags.autoFastForward = value
-                if value then
-                    Feature.startLoop("autoFastForward", function()
-                        return Config.delays.wave
-                    end, function()
-                        Remote.fire("FastForward", Config.wave.fastForward)
-                    end)
-                else
-                    Feature.stopLoop("autoFastForward")
-                end
-            end)
+            end, Feature.setAutoFastForward)
             UI.toggle(controls, "Start Highest Wave", function()
                 return Config.wave.startHighest ~= false
             end, function(value)
@@ -7749,6 +7768,7 @@ function SaltHub.Start()
         tab.render(UI.tabs[tab.name].page)
         UI.tabs[tab.name].page.Parent = UI.content
     end
+    Feature.startLoadedAutomationSettings()
     UI.showTab("Wave")
     if workspaceConfigLoaded then
         Log.push("Loaded settings from executor workspace: " .. tostring(workspaceConfigStatus or getExecutorConfigPath()))
