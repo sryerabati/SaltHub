@@ -277,8 +277,13 @@ test("native menu optimizer freezes or hides preview viewports across game menus
 
   assert.match(source, /optimizeNativeMenus = true/);
   assert.match(source, /nativePreviewBatch = 12/);
+  assert.match(source, /nativeVisualEffectBatch = 256/);
   assert.match(source, /nativePreviewMode = "Hide"/);
   assert.match(source, /function Feature\.freezeNativePreviewViewport/);
+  assert.match(source, /function Feature\.freezeNativeVisualEffect/);
+  assert.match(source, /function Feature\.queueNativeVisualEffect/);
+  assert.match(source, /effect:GetAttribute\("SaltHubFrozenVisualEffect"\) ~= true/);
+  assert.match(source, /function Feature\.processNativeVisualEffectQueue/);
   assert.match(source, /function Feature\.hideNativePreviewViewport/);
   assert.match(source, /function Feature\.getNativePreviewMode/);
   assert.match(source, /function Feature\.setNativePreviewMode/);
@@ -295,6 +300,15 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /descendant\.Disabled = true/);
   assert.match(source, /descendant:IsA\("BasePart"\)/);
   assert.match(source, /descendant\.Anchored = true/);
+  assert.match(source, /instance:IsA\("UIGradient"\)/);
+  assert.match(source, /effect\.Enabled = false/);
+  assert.match(source, /effect\.Offset = Vector2\.new\(0, 0\)/);
+  assert.match(source, /effect\.Rotation = 0/);
+  assert.match(source, /instance:IsA\("ParticleEmitter"\)/);
+  assert.match(source, /instance:IsA\("Beam"\)/);
+  assert.match(source, /instance:IsA\("Trail"\)/);
+  assert.match(source, /instance:IsA\("Highlight"\)/);
+  assert.match(source, /SaltHubFrozenVisualEffect/);
   assert.match(source, /GetPlayingAnimationTracks\(\)/);
   assert.match(source, /track:Stop\(0\)/);
   assert.match(source, /viewport\.Visible = false/);
@@ -334,6 +348,8 @@ test("native menu optimizer avoids descendant task storms when native menus buil
   assert.match(attachBody, /descendant:IsA\("ViewportFrame"\)/);
   assert.match(attachBody, /descendant:IsA\("WorldModel"\)/);
   assert.match(attachBody, /descendant\.Parent:IsA\("ViewportFrame"\)/);
+  assert.match(attachBody, /Feature\.isNativeVisualEffect\(descendant\)/);
+  assert.match(attachBody, /Feature\.queueNativeVisualEffect\(descendant\)/);
   assert.doesNotMatch(attachBody, /Feature\.findAncestorViewport\(descendant\)/);
   assert.doesNotMatch(attachBody, /task\.defer/);
   assert.doesNotMatch(attachBody, /task\.delay/);

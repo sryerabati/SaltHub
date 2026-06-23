@@ -49,6 +49,7 @@ local Config = {
     safety = {
         remoteCooldown = 0.35,
         nativePreviewBatch = 12,
+        nativeVisualEffectBatch = 256,
         nativePreviewMode = "Hide",
     },
     delays = {
@@ -2672,6 +2673,7 @@ Feature = {
     nativeMenuOptimizerConnection = nil,
     nativeMenuRootConnections = {},
     nativeMenuQueuedViewports = {},
+    nativeMenuQueuedVisualEffects = {},
 }
 
 function Feature.getConfigStoragePath()
@@ -2903,15 +2905,42 @@ end
 
 function Feature.getNativeMenuRoots()
     local roots = {}
+    local seen = {}
+    local function add(root)
+        if root and not seen[root] then
+            seen[root] = true
+            table.insert(roots, root)
+        end
+    end
     local frames = Feature.getNativeMenuFrameRoot()
     if not frames then
         return roots
     end
 
     for _, name in ipairs(Feature.getNativeMenuRootNames()) do
-        local root = frames:FindFirstChild(name)
-        if root then
-            table.insert(roots, root)
+        add(frames:FindFirstChild(name))
+    end
+    for _, root in ipairs(frames:GetChildren()) do
+        add(root)
+    end
+    return roots
+end
+
+function Feature.getNativeVisualEffectRoots()
+    local roots = Feature.getNativeMenuRoots()
+    local seen = {}
+    for _, root in ipairs(roots) do
+        seen[root] = true
+    end
+
+    local mainUi = PlayerGui:FindFirstChild("MainUI")
+    if mainUi then
+        for _, name in ipairs({ "Hotbar", "Lootbox" }) do
+            local root = mainUi:FindFirstChild(name)
+            if root and not seen[root] then
+                seen[root] = true
+                table.insert(roots, root)
+            end
         end
     end
     return roots
@@ -2945,6 +2974,42 @@ function Feature.stopNativePreviewTracks(animationOwner)
             track:Stop(0)
         end)
     end
+end
+
+function Feature.isNativeVisualEffect(instance)
+    return instance
+        and (instance:IsA("UIGradient")
+            or instance:IsA("ParticleEmitter")
+            or instance:IsA("Beam")
+            or instance:IsA("Trail")
+            or instance:IsA("Highlight")
+            or instance:IsA("Fire")
+            or instance:IsA("Smoke")
+            or instance:IsA("Sparkles"))
+end
+
+function Feature.freezeNativeVisualEffect(effect)
+    if not Feature.isNativeVisualEffect(effect) then
+        return false
+    end
+
+    effect:SetAttribute("SaltHubFrozenVisualEffect", true)
+    if effect:IsA("UIGradient") then
+        pcall(function()
+            effect.Enabled = false
+        end)
+        pcall(function()
+            effect.Offset = Vector2.new(0, 0)
+        end)
+        pcall(function()
+            effect.Rotation = 0
+        end)
+    else
+        pcall(function()
+            effect.Enabled = false
+        end)
+    end
+    return true
 end
 
 function Feature.getNativePreviewMode()
@@ -3031,6 +3096,8 @@ function Feature.freezeNativePreviewViewport(viewport)
             pcall(function()
                 descendant.Anchored = true
             end)
+        elseif Feature.isNativeVisualEffect(descendant) then
+            Feature.freezeNativeVisualEffect(descendant)
         elseif descendant:IsA("Humanoid") or descendant:IsA("Animator") or descendant:IsA("AnimationController") then
             Feature.stopNativePreviewTracks(descendant)
         end
@@ -3045,6 +3112,12 @@ function Feature.queueNativePreviewViewport(viewport)
     end
 end
 
+function Feature.queueNativeVisualEffect(effect)
+    if Feature.isNativeVisualEffect(effect) and effect:GetAttribute("SaltHubFrozenVisualEffect") ~= true then
+        Feature.nativeMenuQueuedVisualEffects[effect] = true
+    end
+end
+
 function Feature.queueNativeMenuRoot(Root)
     if not Root then
         return
@@ -3053,6 +3126,21 @@ function Feature.queueNativeMenuRoot(Root)
     for _, descendant in ipairs(Root:GetDescendants()) do
         if descendant:IsA("ViewportFrame") then
             Feature.queueNativePreviewViewport(descendant)
+        end
+        if Feature.isNativeVisualEffect(descendant) then
+            Feature.queueNativeVisualEffect(descendant)
+        end
+    end
+end
+
+function Feature.queueNativeVisualEffectRoot(Root)
+    if not Root then
+        return
+    end
+
+    for _, descendant in ipairs(Root:GetDescendants()) do
+        if Feature.isNativeVisualEffect(descendant) then
+            Feature.queueNativeVisualEffect(descendant)
         end
     end
 end
@@ -3075,11 +3163,13 @@ function Feature.attachNativeMenuRoot(Root)
             viewport = descendant.Parent
         end
 
-        if not viewport then
-            return
+        if viewport then
+            Feature.queueNativePreviewViewport(viewport)
         end
 
-        Feature.queueNativePreviewViewport(viewport)
+        if Feature.isNativeVisualEffect(descendant) then
+            Feature.queueNativeVisualEffect(descendant)
+        end
     end)
     Feature.nativeMenuRootConnections[Root] = connection
     Maid:add(connection)
@@ -3088,6 +3178,9 @@ end
 function Feature.refreshNativeMenuOptimizerRoots()
     for _, root in ipairs(Feature.getNativeMenuRoots()) do
         Feature.attachNativeMenuRoot(root)
+    end
+    for _, root in ipairs(Feature.getNativeVisualEffectRoots()) do
+        Feature.queueNativeVisualEffectRoot(root)
     end
 end
 
@@ -3109,13 +3202,31 @@ function Feature.processNativePreviewQueue(limit)
     return processed
 end
 
+function Feature.processNativeVisualEffectQueue(limit)
+    local budget = math.max(tonumber(limit) or Config.safety.nativeVisualEffectBatch or 256, 1)
+    local processed = 0
+
+    for effect in pairs(Feature.nativeMenuQueuedVisualEffects) do
+        Feature.nativeMenuQueuedVisualEffects[effect] = nil
+        if effect and effect.Parent then
+            Feature.freezeNativeVisualEffect(effect)
+        end
+        processed += 1
+        if processed >= budget then
+            break
+        end
+    end
+
+    return processed
+end
+
 function Feature.optimizeNativeMenuPreviews(limit)
     if not Config.flags.optimizeNativeMenus then
         return 0
     end
 
     Feature.refreshNativeMenuOptimizerRoots()
-    return Feature.processNativePreviewQueue(limit)
+    return Feature.processNativePreviewQueue(limit) + Feature.processNativeVisualEffectQueue(Config.safety.nativeVisualEffectBatch)
 end
 
 function Feature.attachNativeMenuOptimizer()
@@ -3136,6 +3247,7 @@ function Feature.attachNativeMenuOptimizer()
         end
 
         Feature.processNativePreviewQueue(Config.safety.nativePreviewBatch)
+        Feature.processNativeVisualEffectQueue(Config.safety.nativeVisualEffectBatch)
     end)
     Maid:add(Feature.nativeMenuOptimizerConnection)
     Feature.optimizeNativeMenuPreviews(Config.safety.nativePreviewBatch)
