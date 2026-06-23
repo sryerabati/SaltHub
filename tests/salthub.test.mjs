@@ -145,6 +145,29 @@ test("nen sniping ignores buhara setup event", () => {
   assert.doesNotMatch(source, /"Buhara",\s*\n\s*"Titan"/);
 });
 
+test("snipe hold waits only on secret pity and throttles expensive event scans", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /eventScanInterval = 4\.0/);
+  assert.match(source, /function Feature\.isSecretPityAtOneRoll/);
+  assert.match(source, /function Feature\.getCachedSelectedSnipeEventActive/);
+  assert.match(source, /State\.lastSelectedEventScanAt/);
+  assert.match(source, /State\.cachedSelectedEventActive/);
+
+  const pityBody = source.match(/function Feature\.isSecretPityAtOneRoll\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(pityBody, /secret/);
+  assert.doesNotMatch(pityBody, /mythic\/secret/);
+  assert.doesNotMatch(pityBody, /mythic/);
+
+  const holdBody = source.match(/function Feature\.shouldHoldPityForEvent\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(holdBody, /Feature\.isSecretPityAtOneRoll\(\)/);
+  assert.match(holdBody, /Feature\.getCachedSelectedSnipeEventActive\(\)/);
+  assert.doesNotMatch(holdBody, /Feature\.isPityAtOneRoll\(\)/);
+
+  const scanBody = source.match(/function Feature\.scanSelectedEventText\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.doesNotMatch(scanBody, /PlayerGui:FindFirstChild\("MainUI"\)/);
+});
+
 test("SaltHub includes battlepass autoclaim support", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
@@ -1224,10 +1247,10 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /FoodNeeded/);
   assert.match(source, /CarryingFood/);
   assert.match(source, /quantity\.Text/);
-  assert.match(source, /Feature\.teleportToInstance\(drop\.instance\)/);
+  assert.match(source, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
   assert.match(source, /local prompt = Feature\.getBuharaFeedPrompt\(target\)/);
   assert.match(source, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
-  assert.match(source, /Feature\.holdPrompt\(prompt\)/);
+  assert.match(source, /Feature\.tryBuharaPrompt\(prompt\)/);
   assert.match(source, /return not Feature\.isCarryingBuharaFood\(\)/);
   assert.match(source, /Feature\.startLoop\("autoBuhara"[\s\S]*Feature\.autoBuharaStep/);
 
@@ -1236,7 +1259,7 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   const feedBody = source.match(/function Feature\.feedBuhara\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(feedBody, /Remote\.fire\("BuharaDropFood"\)/);
   const buharaBody = source.match(/function Feature\.getBuharaData\(\)([\s\S]*?)function Feature\.toggleBuhara/)?.[1] ?? "";
-  assert.match(buharaBody, /Feature\.teleportToInstance\(drop\.instance\)/);
+  assert.match(buharaBody, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
   assert.doesNotMatch(buharaBody, /for _, instance in ipairs\(workspace:GetDescendants\(\)\) do[\s\S]*?local foodName = Feature\.getBuharaFoodName\(instance\)/);
 });
 
@@ -1244,15 +1267,30 @@ test("buhara collection and feeding use direct teleport positioning", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   const collectBody = source.match(/function Feature\.collectBuharaFood\(drop\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(collectBody, /Feature\.teleportToInstance\(drop\.instance\)/);
+  assert.match(source, /teleportOffset = 1\.35/);
+  assert.match(source, /collectRetries = 3/);
+  assert.match(source, /feedRetries = 3/);
+  assert.match(source, /function Feature\.teleportToBuharaObject/);
+  assert.match(source, /function Feature\.detectCarriedBuharaFood/);
+  assert.match(source, /function Feature\.tryBuharaPrompt/);
+  assert.match(collectBody, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
+  assert.match(collectBody, /for attempt = 1, math\.max\(tonumber\(Config\.buhara\.collectRetries\) or 1, 1\) do/);
+  assert.match(collectBody, /Feature\.detectCarriedBuharaFood\(\)/);
+  assert.doesNotMatch(collectBody, /Feature\.teleportToInstance\(drop\.instance\)/);
   assert.doesNotMatch(collectBody, /Feature\.moveNearInstance\(drop\.instance, Config\.buhara\.foodCollectDistance, false\)/);
   assert.doesNotMatch(collectBody, /Feature\.moveToCFrame\([^)]*Config\.delays\.moveTimeout,\s*false\)/);
 
   const feedMoveBody = source.match(/function Feature\.moveToBuharaFeedPrompt\(target, prompt\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(feedMoveBody, /Feature\.teleportToInstance\(prompt\)/);
-  assert.match(feedMoveBody, /Feature\.teleportToCFrame\(CFrame\.lookAt\(legCenter, root\.Position\)\)/);
+  assert.match(feedMoveBody, /Feature\.teleportToBuharaObject\(prompt, Config\.buhara\.feedDistance\)/);
+  assert.match(feedMoveBody, /Feature\.teleportToBuharaObject\(target, Config\.buhara\.feedDistance\)/);
+  assert.doesNotMatch(feedMoveBody, /Feature\.teleportToInstance\(prompt\)/);
+  assert.doesNotMatch(feedMoveBody, /Feature\.teleportToCFrame\(CFrame\.lookAt\(legCenter, root\.Position\)\)/);
   assert.doesNotMatch(feedMoveBody, /Feature\.moveNearInstance\(prompt, Config\.buhara\.feedDistance, false\)/);
   assert.doesNotMatch(feedMoveBody, /Feature\.moveToCFrame\([^)]*Config\.delays\.moveTimeout,\s*false\)/);
+
+  const feedBody = source.match(/function Feature\.feedBuhara\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(feedBody, /for attempt = 1, math\.max\(tonumber\(Config\.buhara\.feedRetries\) or 1, 1\) do/);
+  assert.match(feedBody, /Feature\.tryBuharaPrompt\(prompt\)/);
 });
 
 test("auto start wave is gated by owned plot wave state", () => {

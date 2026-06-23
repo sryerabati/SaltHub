@@ -57,6 +57,7 @@ local Config = {
         buyScan = 0.12,
         rollSettle = 0.55,
         pityHoldPoll = 1.0,
+        eventScanInterval = 4.0,
         buyPause = 0.9,
         moveTimeout = 1.35,
         merge = 0.8,
@@ -176,6 +177,9 @@ local Config = {
         feedTargetNames = { "Buhara", "BuharaEvent" },
         foodCollectDistance = 2.2,
         feedDistance = 1.1,
+        teleportOffset = 1.35,
+        collectRetries = 3,
+        feedRetries = 3,
         scanInterval = 0.65,
         maxScanItems = 450,
     },
@@ -769,6 +773,8 @@ local State = {
     activeEventText = "",
     lastEventUiAt = 0,
     eventUiAttached = false,
+    cachedSelectedEventActive = false,
+    lastSelectedEventScanAt = 0,
     lastPityHoldLogAt = 0,
     lastTraitLogAt = 0,
     dataClient = nil,
@@ -3363,6 +3369,8 @@ function Feature.applyAutoRollSettingsLocal()
     Config.roll.targetMutations = uniqueSorted(Config.roll.targetMutations)
     Config.roll.unitMutationTargets = normalizeUnitMutationTargets(Config.roll.unitMutationTargets)
     Config.roll.snipeEvents = uniqueSorted(Config.roll.snipeEvents)
+    State.cachedSelectedEventActive = false
+    State.lastSelectedEventScanAt = 0
     Log.push("Auto Roll filters saved locally.")
 end
 
@@ -4124,6 +4132,19 @@ function Feature.isPityAtOneRoll()
     return hasTarget and text:find("in 1 roll", 1, true) ~= nil
 end
 
+function Feature.isSecretPityAtOneRoll()
+    for _, entry in ipairs(Feature.getRollPityEntries()) do
+        local rarity = normalizeText(entry.rarity)
+        local timer = normalizeText(entry.timer)
+        if rarity:find("secret", 1, true) and timer:find("in 1 roll", 1, true) then
+            return true
+        end
+    end
+
+    local text = normalizeText(Feature.getPityText())
+    return text:find("secret in 1 roll", 1, true) ~= nil or text:find("secret: in 1 roll", 1, true) ~= nil
+end
+
 function Feature.isEventStatusText(text)
     local clean = normalizeText(text)
     if clean == "" or clean:find("next event", 1, true) then
@@ -4217,12 +4238,16 @@ function Feature.trackEventUi(...)
     if clean:find("end", 1, true) or clean:find("stop", 1, true) or clean:find("over", 1, true) then
         State.activeEventText = ""
         State.lastEventUiAt = 0
+        State.cachedSelectedEventActive = false
+        State.lastSelectedEventScanAt = os.clock()
         return
     end
 
     State.activeEventText = text
     State.lastEventUiAt = os.clock()
     if Feature.isActiveEventTextForSelection(text) then
+        State.cachedSelectedEventActive = true
+        State.lastSelectedEventScanAt = os.clock()
         State.pityHoldUntil = 0
     end
 end
@@ -4244,7 +4269,6 @@ end
 function Feature.scanSelectedEventText()
     local selectedEvents = Feature.getSelectedSnipeEvents()
     local roots = {
-        PlayerGui:FindFirstChild("MainUI"),
         PlayerGui:FindFirstChild("EventUI"),
         workspace:FindFirstChild("EventAttachments"),
     }
@@ -4338,14 +4362,26 @@ function Feature.isSelectedSnipeEventActive()
     return false
 end
 
+function Feature.getCachedSelectedSnipeEventActive()
+    local now = os.clock()
+    local interval = math.max(tonumber(Config.delays.eventScanInterval) or 4.0, 1.0)
+    if now - (State.lastSelectedEventScanAt or 0) < interval then
+        return State.cachedSelectedEventActive == true
+    end
+
+    State.lastSelectedEventScanAt = now
+    State.cachedSelectedEventActive = Feature.isSelectedSnipeEventActive()
+    return State.cachedSelectedEventActive == true
+end
+
 function Feature.shouldHoldPityForEvent()
     if not Config.flags.holdPityForEvent then
         return false
     end
-    if not Feature.isPityAtOneRoll() then
+    if not Feature.isSecretPityAtOneRoll() then
         return false
     end
-    return not Feature.isSelectedSnipeEventActive()
+    return not Feature.getCachedSelectedSnipeEventActive()
 end
 
 function Feature.setPityHoldBackoff()
@@ -4379,7 +4415,7 @@ function Feature.autoRollStep()
         Feature.setPityHoldBackoff()
         if os.clock() - (State.lastPityHoldLogAt or 0) > 3 then
             State.lastPityHoldLogAt = os.clock()
-            Log.push("Holding Mythic/Secret in 1 roll for selected event.")
+            Log.push("Holding Secret in 1 roll for selected event.")
         end
         return
     end
@@ -7630,9 +7666,54 @@ function Feature.findWantedBuharaFood(wantedFoods)
     return Feature.getBuharaFoodDrops(wantedFoods)[1]
 end
 
-function Feature.isCarryingBuharaFood()
+function Feature.detectCarriedBuharaFood()
     local character = LocalPlayer.Character
-    return character and character:GetAttribute("CarryingFood") == true
+    if not character then
+        return false
+    end
+    if character:GetAttribute("CarryingFood") == true then
+        return true
+    end
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("Tool") or descendant:IsA("Model") or descendant:IsA("BasePart") then
+            if Feature.getBuharaFoodName(descendant) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function Feature.isCarryingBuharaFood()
+    return Feature.detectCarriedBuharaFood()
+end
+
+function Feature.teleportToBuharaObject(instance, distance)
+    local root = Feature.getCharacterRoot()
+    local targetPart = Feature.getTargetPart(instance)
+    if not root or not targetPart then
+        Log.push("Buhara teleport target was not found.")
+        return false
+    end
+
+    local offset = math.max(tonumber(distance) or Config.buhara.teleportOffset or 1.35, 0.5)
+    local direction = root.Position - targetPart.Position
+    if direction.Magnitude < 0.1 then
+        direction = -targetPart.CFrame.LookVector
+    else
+        direction = direction.Unit
+    end
+
+    local targetPosition = targetPart.Position + direction * offset + Vector3.new(0, 2.15, 0)
+    return Feature.teleportToCFrame(CFrame.lookAt(targetPosition, targetPart.Position))
+end
+
+function Feature.tryBuharaPrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then
+        return false
+    end
+    return Feature.holdPrompt(prompt)
 end
 
 function Feature.collectBuharaFood(drop)
@@ -7640,14 +7721,20 @@ function Feature.collectBuharaFood(drop)
         return false
     end
 
-    Feature.teleportToInstance(drop.instance)
-    task.wait(0.05)
-    if drop.prompt then
-        Feature.holdPrompt(drop.prompt)
-    else
-        local part = Feature.getTargetPart(drop.instance)
-        if part then
-            Feature.teleportToCFrame(CFrame.lookAt(part.Position, part.Position + Vector3.new(0, 0, -1)))
+    for attempt = 1, math.max(tonumber(Config.buhara.collectRetries) or 1, 1) do
+        Feature.teleportToBuharaObject(drop.instance, Config.buhara.foodCollectDistance)
+        task.wait(0.06)
+        if drop.prompt then
+            Feature.tryBuharaPrompt(drop.prompt)
+        else
+            local prompt = drop.instance:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                Feature.tryBuharaPrompt(prompt)
+            end
+        end
+        task.wait(0.18)
+        if Feature.detectCarriedBuharaFood() then
+            return true
         end
     end
     return Feature.isCarryingBuharaFood()
@@ -7747,15 +7834,10 @@ end
 
 function Feature.moveToBuharaFeedPrompt(target, prompt)
     if prompt then
-        return Feature.teleportToInstance(prompt)
+        return Feature.teleportToBuharaObject(prompt, Config.buhara.feedDistance)
     end
 
-    local legCenter = Feature.getBuharaLegCenter(target)
-    local root = Feature.getCharacterRoot()
-    if not legCenter or not root then
-        return false
-    end
-    return Feature.teleportToCFrame(CFrame.lookAt(legCenter, root.Position))
+    return Feature.teleportToBuharaObject(target, Config.buhara.feedDistance)
 end
 
 function Feature.feedBuhara()
@@ -7776,10 +7858,15 @@ function Feature.feedBuhara()
         return false
     end
 
-    Feature.moveToBuharaFeedPrompt(target, prompt)
-    task.wait(0.05)
-    Feature.holdPrompt(prompt)
-    task.wait(0.2)
+    for attempt = 1, math.max(tonumber(Config.buhara.feedRetries) or 1, 1) do
+        Feature.moveToBuharaFeedPrompt(target, prompt)
+        task.wait(0.06)
+        Feature.tryBuharaPrompt(prompt)
+        task.wait(0.2)
+        if not Feature.isCarryingBuharaFood() then
+            return true
+        end
+    end
     return not Feature.isCarryingBuharaFood()
 end
 
