@@ -7272,6 +7272,7 @@ function Feature.resetAutoMergePending()
         familyKey = "",
         ignoredFamilies = {},
         ignoredKeys = {},
+        failedKeys = {},
     }
     return State.pendingMerge
 end
@@ -7436,7 +7437,7 @@ function Feature.placeUnitForMerge(unit, cell)
     if type(response) == "table" then
         if response.Success == false then
             Log.push("Merge place rejected " .. tostring(unit.name) .. ": " .. tostring(response.Message or "server rejected"))
-            State.mergeRejectedUntil = os.clock() + (tonumber(Config.delays.mergeRejectBackoff) or 3)
+            Feature.backoffMerge("rejected placement")
             return false
         end
         if response.Success == true then
@@ -7445,7 +7446,33 @@ function Feature.placeUnitForMerge(unit, cell)
     end
 
     Log.push("Merge place timed out waiting for " .. tostring(unit.name) .. ".")
+    Feature.backoffMerge("placement timeout")
     return false
+end
+
+function Feature.backoffMerge(reason)
+    State.mergeRejectedUntil = os.clock() + (tonumber(Config.delays.mergeRejectBackoff) or 3)
+    if reason and tostring(reason) ~= "" then
+        Log.push("Merge cooling down after " .. tostring(reason) .. ".")
+    end
+end
+
+function Feature.cleanupFailedMergeAttempt(anchor, fodder, keepAnchorPlaced)
+    if not keepAnchorPlaced then
+        Feature.pickupUnitForMerge(anchor)
+    end
+    Feature.pickupUnitForMerge(fodder)
+
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function()
+            humanoid:UnequipTools()
+        end)
+    end
+
+    task.wait(0.08)
+    State.scanUnits()
 end
 
 function Feature.waitForUnitLevel(unit, expectedLevel, timeout)
@@ -7457,7 +7484,11 @@ function Feature.waitForUnitLevel(unit, expectedLevel, timeout)
         end
         task.wait(0.1)
     until os.clock() >= deadline
-    return Feature.refreshMergeTarget(unit)
+    local refreshed = Feature.refreshMergeTarget(unit)
+    if refreshed and Feature.unitMergeLevel(refreshed) >= expectedLevel then
+        return refreshed
+    end
+    return nil
 end
 
 function Feature.mergeUnitsOnCell(anchor, fodder, cell)
@@ -7470,6 +7501,7 @@ function Feature.mergeUnitsOnCell(anchor, fodder, cell)
     Feature.pickupUnitForMerge(fodder)
     if not Feature.placeUnitForMerge(anchor, cell) then
         Log.push("Merge stopped: could not place anchor " .. tostring(anchor.name) .. ".")
+        Feature.cleanupFailedMergeAttempt(anchor, fodder, false)
         return nil
     end
 
@@ -7477,11 +7509,19 @@ function Feature.mergeUnitsOnCell(anchor, fodder, cell)
     task.wait(math.max(Config.safety.remoteCooldown, 0.12))
     if not Feature.placeUnitForMerge(fodder, mergeCell) then
         Log.push("Merge stopped: could not place fodder " .. tostring(fodder.name) .. ".")
+        Feature.cleanupFailedMergeAttempt(anchor, fodder, false)
         return nil
     end
 
     task.wait(math.max(Config.delays.merge, Config.safety.remoteCooldown, 0.25))
-    return Feature.waitForUnitLevel(anchor, anchorLevel + 1, 3)
+    local updated = Feature.waitForUnitLevel(anchor, anchorLevel + 1, 3)
+    if not updated then
+        Log.push("Merge stopped: level did not update for " .. tostring(anchor.name) .. ".")
+        Feature.cleanupFailedMergeAttempt(anchor, fodder, false)
+        Feature.backoffMerge("merge level check timeout")
+        return nil
+    end
+    return updated
 end
 
 function Feature.mergeFodderIntoPlacedAnchor(anchor, fodder, cell)
@@ -7501,11 +7541,19 @@ function Feature.mergeFodderIntoPlacedAnchor(anchor, fodder, cell)
     task.wait(math.max(Config.safety.remoteCooldown, 0.12))
     if not Feature.placeUnitForMerge(fodder, mergeCell) then
         Log.push("Merge stopped: could not place fodder " .. tostring(fodder.name) .. ".")
+        Feature.cleanupFailedMergeAttempt(anchor, fodder, true)
         return nil
     end
 
     task.wait(math.max(Config.delays.merge, Config.safety.remoteCooldown, 0.25))
-    return Feature.waitForUnitLevel(anchor, anchorLevel + 1, 3)
+    local updated = Feature.waitForUnitLevel(anchor, anchorLevel + 1, 3)
+    if not updated then
+        Log.push("Merge stopped: level did not update for " .. tostring(anchor.name) .. ".")
+        Feature.cleanupFailedMergeAttempt(anchor, fodder, true)
+        Feature.backoffMerge("merge level check timeout")
+        return nil
+    end
+    return updated
 end
 
 function Feature.buildFodderForMergeLevel(target, level, usedIds, depth, directLevelLimit)
@@ -7569,6 +7617,7 @@ function Feature.executeTargetMergeCascade(selected)
         Feature.pickupUnitForMerge(target)
         if not Feature.placeUnitForMerge(target, targetCell) then
             Log.push("Target merge stopped: could not place selected target.")
+            Feature.cleanupFailedMergeAttempt(target, nil, false)
             return false
         end
         targetCell = Feature.waitForMergeCell(target, targetCell)
@@ -7660,6 +7709,7 @@ function Feature.autoMergeStep()
         pending.familyKey = family.familyKey
         pending.ignoredFamilies = {}
         pending.ignoredKeys = {}
+        pending.failedKeys = {}
         Log.push("Auto merge focusing " .. tostring(family.displayName) .. ".")
     end
 
@@ -7675,6 +7725,7 @@ function Feature.autoMergeStep()
         pending.displayName = family.displayName
         pending.familyKey = family.familyKey
         pending.ignoredKeys = {}
+        pending.failedKeys = {}
         Log.push("Auto merge moving to " .. tostring(family.displayName) .. " mutation " .. tostring(family.mutationKey) .. ".")
     end
 
@@ -7683,14 +7734,26 @@ function Feature.autoMergeStep()
         pending.ignoredFamilies[pending.familyKey] = true
         pending.familyKey = ""
         pending.ignoredKeys = {}
+        pending.failedKeys = {}
         return false
     end
 
     if Feature.executeTargetMergeCascade(plan.target) then
+        pending.failedKeys = pending.failedKeys or {}
+        pending.failedKeys[plan.key] = nil
         return true
     end
 
-    pending.ignoredKeys[plan.key] = true
+    pending.failedKeys = pending.failedKeys or {}
+    local failures = (pending.failedKeys[plan.key] or 0) + 1
+    pending.failedKeys[plan.key] = failures
+    if failures >= 3 then
+        pending.ignoredKeys[plan.key] = true
+        pending.failedKeys[plan.key] = nil
+        Log.push("Auto merge skipped repeated failing duplicate group.")
+    else
+        Log.push("Auto merge will retry duplicate group after cleanup.")
+    end
     return false
 end
 
@@ -7716,6 +7779,7 @@ function Feature.mergeSelectedTarget()
     end
 
     local ignoredKeys = {}
+    local failedKeys = {}
     local merged = false
     for _ = 1, 12 do
         if os.clock() < (State.mergeRejectedUntil or 0) then
@@ -7731,9 +7795,18 @@ function Feature.mergeSelectedTarget()
         end
 
         if Feature.executeTargetMergeCascade(plan.target) then
+            failedKeys[plan.key] = nil
             merged = true
         else
-            ignoredKeys[plan.key] = true
+            local failures = (failedKeys[plan.key] or 0) + 1
+            failedKeys[plan.key] = failures
+            if failures >= 3 then
+                ignoredKeys[plan.key] = true
+                failedKeys[plan.key] = nil
+                Log.push("Selected merge skipped repeated failing duplicate group.")
+            else
+                Log.push("Selected merge will retry duplicate group after cleanup.")
+            end
         end
         task.wait(math.max(Config.delays.merge, Config.safety.remoteCooldown, 0.25))
     end

@@ -968,9 +968,12 @@ test("merge cell lookup prefers placed model Cells attributes over character roo
 test("placed-anchor merge waits for remote cooldown before placing fodder", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const mergeFodderIntoPlacedAnchor = source.match(/function Feature\.mergeFodderIntoPlacedAnchor\(anchor, fodder, cell\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const waitForUnitLevel = source.match(/function Feature\.waitForUnitLevel\(unit, expectedLevel, timeout\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(mergeFodderIntoPlacedAnchor, /task\.wait\(math\.max\(Config\.safety\.remoteCooldown, 0\.12\)\)/);
   assert.match(mergeFodderIntoPlacedAnchor, /Feature\.placeUnitForMerge\(fodder, mergeCell\)/);
+  assert.match(waitForUnitLevel, /return nil/);
+  assert.doesNotMatch(waitForUnitLevel, /return Feature\.refreshMergeTarget\(unit\)/);
 });
 
 test("merge placement uses real shape placement data and waits for server acceptance", () => {
@@ -1135,24 +1138,36 @@ test("auto merge retries another duplicate group after an unplaceable group fail
 
   assert.match(source, /function Feature\.getDuplicateMergePlan\(selectedOnly, ignoredKeys\)/);
   assert.match(source, /function Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
+  assert.match(source, /failedKeys = \{\}/);
+  assert.match(autoMergeStep, /pending\.failedKeys\[plan\.key\] = failures/);
+  assert.match(autoMergeStep, /if failures >= 3 then[\s\S]*pending\.ignoredKeys\[plan\.key\] = true/);
   assert.match(autoMergeStep, /pending\.ignoredKeys\[plan\.key\] = true/);
   assert.match(autoMergeStep, /Feature\.getDuplicateMergePlanForFamily\(pending\.familyKey, pending\.ignoredKeys\)/);
   assert.doesNotMatch(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
 });
 
-test("auto merge pauses during native menus and backs off after rejected placements", () => {
+test("auto merge pauses during native menus, backs off, and cleans dirty merge attempts", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const placeUnitForMerge = source.match(/function Feature\.placeUnitForMerge\(unit, cell\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const mergeUnitsOnCell = source.match(/function Feature\.mergeUnitsOnCell\(anchor, fodder, cell\)([\s\S]*?)\nfunction Feature\.mergeFodderIntoPlacedAnchor/)?.[1] ?? "";
+  const mergeFodderIntoPlacedAnchor = source.match(/function Feature\.mergeFodderIntoPlacedAnchor\(anchor, fodder, cell\)([\s\S]*?)\nfunction Feature\.buildFodderForMergeLevel/)?.[1] ?? "";
 
   assert.match(source, /mergeRejectBackoff = 3/);
   assert.match(source, /mergeRejectedUntil = 0/);
   assert.match(source, /lastNativeMenuPauseLogAt = 0/);
   assert.match(source, /function Feature\.isNativeMenuOpen/);
   assert.match(source, /function Feature\.pauseMergeForNativeMenu/);
+  assert.match(source, /function Feature\.backoffMerge/);
+  assert.match(source, /function Feature\.cleanupFailedMergeAttempt/);
+  assert.match(source, /humanoid:UnequipTools\(\)/);
   assert.match(autoMergeStep, /if now < \(State\.mergeRejectedUntil or 0\) then/);
   assert.match(autoMergeStep, /Feature\.pauseMergeForNativeMenu\(now\)/);
-  assert.match(placeUnitForMerge, /State\.mergeRejectedUntil = os\.clock\(\) \+ \(tonumber\(Config\.delays\.mergeRejectBackoff\) or 3\)/);
+  assert.match(placeUnitForMerge, /Feature\.backoffMerge\("rejected placement"\)/);
+  assert.match(mergeUnitsOnCell, /Feature\.cleanupFailedMergeAttempt\(anchor, fodder, false\)/);
+  assert.match(mergeFodderIntoPlacedAnchor, /Feature\.cleanupFailedMergeAttempt\(anchor, fodder, true\)/);
+  assert.match(mergeFodderIntoPlacedAnchor, /local updated = Feature\.waitForUnitLevel\(anchor, anchorLevel \+ 1, 3\)/);
+  assert.match(mergeFodderIntoPlacedAnchor, /if not updated then/);
 });
 
 test("auto merge finishes a character family sweep before choosing another character", () => {
@@ -1216,9 +1231,11 @@ test("selected merge target is an explicit button action that preserves the best
   assert.match(source, /targetCell = Feature\.findMergePlacementCell\(target, targetCell\)/);
   assert.doesNotMatch(source, /Feature\.getDuplicateMergePlan\(true\)/);
   assert.match(mergeSelectedTarget, /local familyKey = Feature\.mergeFamilyKey\(selected\)/);
+  assert.match(mergeSelectedTarget, /local failedKeys = \{\}/);
   assert.match(mergeSelectedTarget, /Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
   assert.match(mergeSelectedTarget, /Feature\.executeTargetMergeCascade\(plan\.target\)/);
-  assert.match(mergeSelectedTarget, /ignoredKeys\[plan\.key\] = true/);
+  assert.match(mergeSelectedTarget, /failedKeys\[plan\.key\] = failures/);
+  assert.match(mergeSelectedTarget, /if failures >= 3 then[\s\S]*ignoredKeys\[plan\.key\] = true/);
   assert.doesNotMatch(mergeSelectedTarget, /Feature\.executeTargetMergeCascade\(selected\)/);
   assert.match(source, /Config\.merge\.targetUnitId = unit\.id/);
   assert.match(source, /Config\.merge\.targetUnitName = unit\.name/);

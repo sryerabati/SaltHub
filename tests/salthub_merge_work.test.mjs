@@ -49,9 +49,13 @@ test("cascade builds higher-level fodder from the starting level instead of cons
 test("placed-anchor target merge waits for place cooldown before dropping fodder", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const mergeFodderIntoPlacedAnchor = source.match(/function Feature\.mergeFodderIntoPlacedAnchor\(anchor, fodder, cell\)[\s\S]*?\nend/)?.[0] ?? "";
+  const waitForUnitLevel = source.match(/function Feature\.waitForUnitLevel\(unit, expectedLevel, timeout\)[\s\S]*?\nend/)?.[0] ?? "";
 
   assert.match(mergeFodderIntoPlacedAnchor, /task\.wait\(math\.max\(Config\.safety\.remoteCooldown, 0\.12\)\)/);
   assert.match(mergeFodderIntoPlacedAnchor, /Feature\.placeUnitForMerge\(fodder, mergeCell\)/);
+  assert.match(mergeFodderIntoPlacedAnchor, /Feature\.cleanupFailedMergeAttempt\(anchor, fodder, true\)/);
+  assert.match(waitForUnitLevel, /return nil/);
+  assert.doesNotMatch(waitForUnitLevel, /return Feature\.refreshMergeTarget\(unit\)/);
 });
 
 test("merge family compares normalized mutation so none stays separate from gold or arrancar", () => {
@@ -105,6 +109,9 @@ test("auto merge retries the next duplicate group when one group cannot be place
 
   assert.match(source, /function Feature\.getDuplicateMergePlan\(selectedOnly, ignoredKeys\)/);
   assert.match(source, /function Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
+  assert.match(source, /failedKeys = \{\}/);
+  assert.match(autoMergeStep, /pending\.failedKeys\[plan\.key\] = failures/);
+  assert.match(autoMergeStep, /if failures >= 3 then[\s\S]*pending\.ignoredKeys\[plan\.key\] = true/);
   assert.match(autoMergeStep, /pending\.ignoredKeys\[plan\.key\] = true/);
   assert.match(autoMergeStep, /Feature\.getDuplicateMergePlanForFamily\(pending\.familyKey, pending\.ignoredKeys\)/);
   assert.doesNotMatch(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
