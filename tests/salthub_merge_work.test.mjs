@@ -16,8 +16,9 @@ test("target merge waits for selected placement before merging duplicates onto i
   assert.doesNotMatch(source, /Feature\.placeUnitForMerge\(plan\.units\[index\], plan\.cell\)/);
 });
 
-test("target merge cascades lower-level duplicates into the selected trait holder", () => {
+test("target merge cascades lower-level duplicates through the selected family plan", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const mergeSelectedTarget = source.match(/function Feature\.mergeSelectedTarget\(\)[\s\S]*?\nend/)?.[0] ?? "";
 
   assert.match(source, /function Feature\.unitMergeLevel/);
   assert.match(source, /function Feature\.mergeMutationKey/);
@@ -29,7 +30,10 @@ test("target merge cascades lower-level duplicates into the selected trait holde
   assert.match(source, /function Feature\.executeTargetMergeCascade/);
   assert.match(source, /Feature\.buildFodderForMergeLevel\(target, targetLevel, usedIds, depth \+ 1, seedLevel\)/);
   assert.match(source, /Feature\.mergeFodderIntoPlacedAnchor\(target, fodder, targetCell\)/);
-  assert.match(source, /return Feature\.executeTargetMergeCascade\(selected\)/);
+  assert.match(mergeSelectedTarget, /local familyKey = Feature\.mergeFamilyKey\(selected\)/);
+  assert.match(mergeSelectedTarget, /Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
+  assert.match(mergeSelectedTarget, /Feature\.executeTargetMergeCascade\(plan\.target\)/);
+  assert.doesNotMatch(mergeSelectedTarget, /Feature\.executeTargetMergeCascade\(selected\)/);
 });
 
 test("cascade builds higher-level fodder from the starting level instead of consuming pre-existing higher-level units", () => {

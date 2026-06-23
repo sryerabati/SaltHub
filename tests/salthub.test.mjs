@@ -1140,6 +1140,21 @@ test("auto merge retries another duplicate group after an unplaceable group fail
   assert.doesNotMatch(autoMergeStep, /Feature\.getDuplicateMergePlan\(false, ignoredKeys\)/);
 });
 
+test("auto merge pauses during native menus and backs off after rejected placements", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const placeUnitForMerge = source.match(/function Feature\.placeUnitForMerge\(unit, cell\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /mergeRejectBackoff = 3/);
+  assert.match(source, /mergeRejectedUntil = 0/);
+  assert.match(source, /lastNativeMenuPauseLogAt = 0/);
+  assert.match(source, /function Feature\.isNativeMenuOpen/);
+  assert.match(source, /function Feature\.pauseMergeForNativeMenu/);
+  assert.match(autoMergeStep, /if now < \(State\.mergeRejectedUntil or 0\) then/);
+  assert.match(autoMergeStep, /Feature\.pauseMergeForNativeMenu\(now\)/);
+  assert.match(placeUnitForMerge, /State\.mergeRejectedUntil = os\.clock\(\) \+ \(tonumber\(Config\.delays\.mergeRejectBackoff\) or 3\)/);
+});
+
 test("auto merge finishes a character family sweep before choosing another character", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
@@ -1180,6 +1195,7 @@ test("auto merge backs off when idle instead of rescanning every merge tick", ()
 
 test("selected merge target is an explicit button action that preserves the best trait duplicate", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const mergeSelectedTarget = source.match(/function Feature\.mergeSelectedTarget\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(source, /targetUnitId = ""/);
   assert.match(source, /targetUnitName = ""/);
@@ -1199,7 +1215,11 @@ test("selected merge target is an explicit button action that preserves the best
   assert.match(source, /units = Feature\.orderMergeUnits\(bestGroup, selected\)/);
   assert.match(source, /targetCell = Feature\.findMergePlacementCell\(target, targetCell\)/);
   assert.doesNotMatch(source, /Feature\.getDuplicateMergePlan\(true\)/);
-  assert.match(source, /Feature\.executeTargetMergeCascade\(selected\)/);
+  assert.match(mergeSelectedTarget, /local familyKey = Feature\.mergeFamilyKey\(selected\)/);
+  assert.match(mergeSelectedTarget, /Feature\.getDuplicateMergePlanForFamily\(familyKey, ignoredKeys\)/);
+  assert.match(mergeSelectedTarget, /Feature\.executeTargetMergeCascade\(plan\.target\)/);
+  assert.match(mergeSelectedTarget, /ignoredKeys\[plan\.key\] = true/);
+  assert.doesNotMatch(mergeSelectedTarget, /Feature\.executeTargetMergeCascade\(selected\)/);
   assert.match(source, /Config\.merge\.targetUnitId = unit\.id/);
   assert.match(source, /Config\.merge\.targetUnitName = unit\.name/);
   assert.match(source, /UI\.inventoryUnitSelector\(page, "Selected Merge Target"/);

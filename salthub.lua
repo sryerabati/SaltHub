@@ -63,6 +63,7 @@ local Config = {
         moveTimeout = 1.35,
         merge = 0.8,
         mergeIdle = 2.5,
+        mergeRejectBackoff = 3,
         trait = 0.75,
         upgrade = 0.7,
         event = 1.0,
@@ -770,6 +771,8 @@ local State = {
     pendingMerge = nil,
     autoMergeIgnoredCharacters = {},
     autoMergeIdleUntil = 0,
+    mergeRejectedUntil = 0,
+    lastNativeMenuPauseLogAt = 0,
     battlepassStatus = "Waiting for data.",
     waveStatus = "-",
     lastWaveStartAt = 0,
@@ -3213,6 +3216,34 @@ function Feature.refreshNativeMenuOptimizerRoots()
     for _, root in ipairs(Feature.getNativeVisualEffectRoots()) do
         Feature.attachNativeVisualEffectRoot(root)
     end
+end
+
+function Feature.isNativeMenuOpen()
+    local frames = Feature.getNativeMenuFrameRoot()
+    if not frames then
+        return false
+    end
+
+    for _, root in ipairs(frames:GetChildren()) do
+        if root:IsA("GuiObject") and root.Visible == true then
+            return true
+        end
+    end
+    return false
+end
+
+function Feature.pauseMergeForNativeMenu(now)
+    if not Feature.isNativeMenuOpen() then
+        return false
+    end
+
+    now = tonumber(now) or os.clock()
+    State.autoMergeIdleUntil = math.max(State.autoMergeIdleUntil or 0, now + 1)
+    if now - (State.lastNativeMenuPauseLogAt or 0) >= 5 then
+        State.lastNativeMenuPauseLogAt = now
+        Log.push("Auto merge paused while a native menu is open.")
+    end
+    return true
 end
 
 function Feature.processNativePreviewQueue(limit)
@@ -7405,6 +7436,7 @@ function Feature.placeUnitForMerge(unit, cell)
     if type(response) == "table" then
         if response.Success == false then
             Log.push("Merge place rejected " .. tostring(unit.name) .. ": " .. tostring(response.Message or "server rejected"))
+            State.mergeRejectedUntil = os.clock() + (tonumber(Config.delays.mergeRejectBackoff) or 3)
             return false
         end
         if response.Success == true then
@@ -7601,7 +7633,13 @@ end
 
 function Feature.autoMergeStep()
     local now = os.clock()
+    if now < (State.mergeRejectedUntil or 0) then
+        return false
+    end
     if now < (State.autoMergeIdleUntil or 0) then
+        return false
+    end
+    if Feature.pauseMergeForNativeMenu(now) then
         return false
     end
 
@@ -7662,7 +7700,44 @@ function Feature.mergeSelectedTarget()
         Log.push("Select a merge target first.")
         return false
     end
-    return Feature.executeTargetMergeCascade(selected)
+    local now = os.clock()
+    if now < (State.mergeRejectedUntil or 0) then
+        Log.push("Merge is cooling down after a rejected placement.")
+        return false
+    end
+    if Feature.pauseMergeForNativeMenu(now) then
+        return false
+    end
+
+    local familyKey = Feature.mergeFamilyKey(selected)
+    if familyKey == "" then
+        Log.push("Selected merge target has no merge family.")
+        return false
+    end
+
+    local ignoredKeys = {}
+    local merged = false
+    for _ = 1, 12 do
+        if os.clock() < (State.mergeRejectedUntil or 0) then
+            break
+        end
+
+        local plan = Feature.getDuplicateMergePlanForFamily(familyKey, ignoredKeys)
+        if not plan then
+            if not merged then
+                Log.push("Selected merge found no duplicate group for " .. tostring(selected.name) .. ".")
+            end
+            return merged
+        end
+
+        if Feature.executeTargetMergeCascade(plan.target) then
+            merged = true
+        else
+            ignoredKeys[plan.key] = true
+        end
+        task.wait(math.max(Config.delays.merge, Config.safety.remoteCooldown, 0.25))
+    end
+    return merged
 end
 
 function Feature.toggleAutoMerge(value)
