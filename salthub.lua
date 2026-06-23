@@ -100,6 +100,7 @@ local Config = {
     },
     bestLineup = {
         dpsWeight = 1,
+        damageWeight = 0.12,
         rangeWeight = 0.08,
         cooldownWeight = 3,
         rarityWeight = 3,
@@ -110,6 +111,7 @@ local Config = {
         beamWidth = 192,
         candidateLimit = 128,
         dpsCandidateLimit = 96,
+        damageCandidateLimit = 48,
         densityCandidateLimit = 64,
         frontCandidateLimit = 96,
         fillCandidateLimit = 512,
@@ -197,6 +199,8 @@ end
 local function applyBestLineupOptimizerDefaults()
     local best = Config.bestLineup or {}
     Config.bestLineup = best
+    best.damageWeight = tonumber(best.damageWeight) or 0.12
+    best.damageCandidateLimit = math.max(tonumber(best.damageCandidateLimit) or 0, 48)
     best.beamWidth = math.max(tonumber(best.beamWidth) or 0, 192)
     best.candidateLimit = math.max(tonumber(best.candidateLimit) or 0, 128)
     best.dpsCandidateLimit = math.max(tonumber(best.dpsCandidateLimit) or 0, 96)
@@ -4552,7 +4556,7 @@ function Feature.scoreLineupUnit(unit)
     local areaBonus = (derived.splashRadius * 0.18) + (derived.lineWidth * 0.12)
     local cadenceBonus = derived.cooldown > 0 and (1 / math.max(derived.cooldown, 0.05)) * (tonumber(Config.bestLineup.cooldownWeight) or 0) or 0
     local score = derived.dps * (tonumber(Config.bestLineup.dpsWeight) or 1)
-        + derived.damage * 0.03
+        + derived.damage * (tonumber(Config.bestLineup.damageWeight) or 0.12)
         + derived.range * (tonumber(Config.bestLineup.rangeWeight) or 0)
         + cadenceBonus
         + rarityBonus
@@ -4963,7 +4967,7 @@ function Feature.buildBestLineupCandidates(includeEquipped)
     State.scanUnits()
     local allCandidates = {}
     for _, unit in ipairs(State.characters) do
-        if not unit.crafting and not unit.cloning and not unit.locked and (includeEquipped or not unit.equipped) then
+        if not unit.crafting and not unit.cloning and (includeEquipped or not unit.equipped) then
             local score, derived = Feature.scoreLineupUnit(unit)
             local footprint = Feature.getShapeFootprint(unit.name)
             if score and footprint then
@@ -4983,6 +4987,20 @@ function Feature.buildBestLineupCandidates(includeEquipped)
 
     local byDps = copyArray(allCandidates)
     table.sort(byDps, function(a, b)
+        if a.derived.dps ~= b.derived.dps then
+            return a.derived.dps > b.derived.dps
+        end
+        if a.score ~= b.score then
+            return a.score > b.score
+        end
+        return tostring(a.unit.id) < tostring(b.unit.id)
+    end)
+
+    local byDamage = copyArray(allCandidates)
+    table.sort(byDamage, function(a, b)
+        if a.derived.damage ~= b.derived.damage then
+            return a.derived.damage > b.derived.damage
+        end
         if a.derived.dps ~= b.derived.dps then
             return a.derived.dps > b.derived.dps
         end
@@ -5024,6 +5042,7 @@ function Feature.buildBestLineupCandidates(includeEquipped)
     end
 
     addFrom(byDps, math.max(1, tonumber(Config.bestLineup.dpsCandidateLimit) or limit))
+    addFrom(byDamage, math.max(1, tonumber(Config.bestLineup.damageCandidateLimit) or limit))
     addFrom(byFrontNeed, math.max(1, tonumber(Config.bestLineup.frontCandidateLimit) or limit))
     addFrom(byDensity, math.max(1, tonumber(Config.bestLineup.densityCandidateLimit) or limit))
     if #candidates < limit then
@@ -7388,6 +7407,7 @@ function Feature.importConfig(text)
     end)
     if ok and type(decoded) == "table" then
         mergeConfig(Config, decoded.Config or decoded)
+        applyBestLineupOptimizerDefaults()
         if UI.scale then
             UI.scale.Scale = Config.ui.scale
         end

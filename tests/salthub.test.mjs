@@ -543,6 +543,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
 
   assert.match(source, /bestLineup = \{/);
   assert.match(source, /dpsWeight = 1/);
+  assert.match(source, /damageWeight = 0\.12/);
   assert.match(source, /rangeWeight = 0\.08/);
   assert.match(source, /cooldownWeight = 3/);
   assert.match(source, /rarityWeight = 3/);
@@ -551,6 +552,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /beamWidth = 192/);
   assert.match(source, /candidateLimit = 128/);
   assert.match(source, /dpsCandidateLimit = 96/);
+  assert.match(source, /damageCandidateLimit = 48/);
   assert.match(source, /densityCandidateLimit = 64/);
   assert.match(source, /frontCandidateLimit = 96/);
   assert.match(source, /fillCandidateLimit = 512/);
@@ -627,6 +629,9 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /offsets = offsets/);
   assert.match(source, /Feature\.getCellByOffset/);
   assert.match(source, /1 \/ math\.max\(derived\.cooldown/);
+  assert.match(source, /derived\.damage \* \(tonumber\(Config\.bestLineup\.damageWeight\) or 0\.12\)/);
+  assert.match(source, /local byDamage = copyArray\(allCandidates\)/);
+  assert.match(source, /addFrom\(byDamage, math\.max\(1, tonumber\(Config\.bestLineup\.damageCandidateLimit\) or limit\)\)/);
   assert.match(source, /State\.characterStatsUiHelper[\s\S]*GetDps/);
   assert.match(source, /helper\.GetDps\(unit\.name, statModel, info, unit\.mutation, traitInfo\)/);
   assert.match(source, /local lowRange = rangeSpan > 0 and \(maxRange - range\) \/ rangeSpan or 0/);
@@ -652,6 +657,24 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /Feature\.improveBestLineupPlan\(plan, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
   assert.match(source, /"Place Best Lineup"/);
   assert.doesNotMatch(source, /function Feature\.placeBestLineup[\s\S]*?Remote\.fire\("AutoMergeToggle"/);
+});
+
+test("best lineup treats locked units as placeable high-damage candidates", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const buildCandidates = source.match(/function Feature\.buildBestLineupCandidates\(includeEquipped\)([\s\S]*?)\nfunction Feature\.getBestLineupFillCandidates/)?.[1] ?? "";
+
+  assert.match(buildCandidates, /not unit\.crafting and not unit\.cloning/);
+  assert.doesNotMatch(buildCandidates, /not unit\.locked/);
+  assert.match(buildCandidates, /local byDamage = copyArray\(allCandidates\)/);
+  assert.match(buildCandidates, /a\.derived\.damage > b\.derived\.damage/);
+});
+
+test("best lineup optimizer defaults preserve damage tuning after imports", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /best\.damageWeight = tonumber\(best\.damageWeight\) or 0\.12/);
+  assert.match(source, /best\.damageCandidateLimit = math\.max\(tonumber\(best\.damageCandidateLimit\) or 0, 48\)/);
+  assert.match(source, /mergeConfig\(Config, decoded\.Config or decoded\)\s+applyBestLineupOptimizerDefaults\(\)/);
 });
 
 test("best lineup optimizer explores front-heavy variants before accepting a plan", () => {
