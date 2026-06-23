@@ -7641,7 +7641,7 @@ function Feature.getBuharaScanRoots()
         add(workspace:FindFirstChild(name))
     end
     for _, child in ipairs(workspace:GetChildren()) do
-        if textMatchesAny(child.Name, { "Food", "Ingredient", "Sandwich", "Buhara" }) then
+        if textMatchesAny(child.Name, { "Food", "Ingredient", "Sandwich", "Buhara", "Burah", "Trait", "Shard" }) then
             add(child)
         end
     end
@@ -7895,8 +7895,8 @@ function Feature.moveToBuharaFeedPrompt(target, prompt)
     return Feature.teleportToBuharaObject(target, Config.buhara.feedDistance)
 end
 
-function Feature.feedBuhara()
-    if not Feature.isCarryingBuharaFood() then
+function Feature.feedBuhara(forceAttempt)
+    if not forceAttempt and not Feature.isCarryingBuharaFood() then
         return false
     end
 
@@ -7931,10 +7931,12 @@ function Feature.autoBuharaStep()
     end
 
     local data = Feature.getBuharaData()
-    if Feature.dropBuharaFoodIfReady(data) then
-        task.wait(0.2)
-        if Feature.isCarryingBuharaFood() then
-            return Feature.feedBuhara()
+    if Feature.areBuharaRequirementsReady(data) then
+        if Feature.dropBuharaFoodIfReady(data) then
+            task.wait(0.2)
+        end
+        if Feature.feedBuhara(true) then
+            return true
         end
     end
 

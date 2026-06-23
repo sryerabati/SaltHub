@@ -1268,6 +1268,8 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /slot\.complete ~= true/);
   assert.match(source, /Remote\.fire\("BuharaDropFood"\)/);
   assert.match(source, /Feature\.dropBuharaFoodIfReady\(data\)/);
+  assert.match(source, /Feature\.feedBuhara\(true\)/);
+  assert.match(source, /textMatchesAny\(child\.Name, \{ "Food", "Ingredient", "Sandwich", "Buhara", "Burah", "Trait", "Shard" \}\)/);
   assert.match(source, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
   assert.match(source, /local prompt = Feature\.getBuharaFeedPrompt\(target\)/);
   assert.match(source, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
@@ -1277,8 +1279,9 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
 
   const buharaToggle = source.match(/function Feature\.toggleBuhara\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(buharaToggle, /Remote\.fire\("BuharaDropFood"\)/);
-  const feedBody = source.match(/function Feature\.feedBuhara\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const feedBody = source.match(/function Feature\.feedBuhara\(forceAttempt\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(feedBody, /Remote\.fire\("BuharaDropFood"\)/);
+  assert.match(feedBody, /not forceAttempt and not Feature\.isCarryingBuharaFood\(\)/);
   const dropBody = source.match(/function Feature\.dropBuharaFoodIfReady\(data\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(dropBody, /Feature\.isCarryingBuharaFood\(\)/);
   assert.match(dropBody, /Feature\.areBuharaRequirementsReady\(data\)/);
@@ -1313,7 +1316,7 @@ test("buhara collection and feeding use direct teleport positioning", () => {
   assert.doesNotMatch(feedMoveBody, /Feature\.moveNearInstance\(prompt, Config\.buhara\.feedDistance, false\)/);
   assert.doesNotMatch(feedMoveBody, /Feature\.moveToCFrame\([^)]*Config\.delays\.moveTimeout,\s*false\)/);
 
-  const feedBody = source.match(/function Feature\.feedBuhara\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const feedBody = source.match(/function Feature\.feedBuhara\(forceAttempt\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(feedBody, /for attempt = 1, math\.max\(tonumber\(Config\.buhara\.feedRetries\) or 1, 1\) do/);
   assert.match(feedBody, /Feature\.tryBuharaPrompt\(prompt\)/);
 });
