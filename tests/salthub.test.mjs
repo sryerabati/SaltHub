@@ -249,16 +249,20 @@ test("anti afk interval starts a periodic pulse loop before Roblox idled fires",
   assert.match(startBody, /Feature\.startAntiAfkLoop\(\)/);
 });
 
-test("native menu optimizer freezes anime preview viewports in game menus", () => {
+test("native menu optimizer freezes or hides preview viewports across game menus", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /optimizeNativeMenus = true/);
   assert.match(source, /nativePreviewBatch = 12/);
+  assert.match(source, /nativePreviewMode = "Static"/);
   assert.match(source, /function Feature\.freezeNativePreviewViewport/);
+  assert.match(source, /function Feature\.hideNativePreviewViewport/);
+  assert.match(source, /function Feature\.getNativePreviewMode/);
+  assert.match(source, /function Feature\.setNativePreviewMode/);
   assert.match(source, /function Feature\.optimizeNativeMenuPreviews/);
   assert.match(source, /function Feature\.attachNativeMenuOptimizer/);
   assert.match(source, /function Feature\.setNativeMenuOptimizerEnabled/);
-  assert.match(source, /"Inventory",\s*"Inventory_Old",\s*"Clone",\s*"Selection"/);
+  assert.match(source, /"Inventory",[\s\S]*"Inventory_Old",[\s\S]*"Clone",[\s\S]*"Selection",[\s\S]*"Shop",[\s\S]*"Index"/);
   assert.match(source, /descendant:IsA\("ViewportFrame"\)/);
   assert.match(source, /worldModel = viewport:FindFirstChild\("WorldModel"\)/);
   assert.match(source, /descendant:IsA\("LocalScript"\)/);
@@ -267,8 +271,13 @@ test("native menu optimizer freezes anime preview viewports in game menus", () =
   assert.match(source, /descendant\.Anchored = true/);
   assert.match(source, /GetPlayingAnimationTracks\(\)/);
   assert.match(source, /track:Stop\(0\)/);
+  assert.match(source, /viewport\.Visible = false/);
+  assert.match(source, /worldModel:ClearAllChildren\(\)/);
+  assert.match(source, /SaltHubHiddenPreview/);
   assert.match(source, /Root\.DescendantAdded:Connect/);
   assert.match(source, /UI\.toggle\(ui, "Optimize Native Menus"/);
+  assert.match(source, /UI\.cycle\(ui, "Native Preview Mode"/);
+  assert.match(source, /return \{ "Static", "Hide" \}/);
 
   const startBody = source.match(/function SaltHub\.Start\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(startBody, /Feature\.attachNativeMenuOptimizer\(\)/);
@@ -619,6 +628,9 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /frontRangeWeight = 0\.72/);
   assert.match(source, /frontDpsWeight = 0\.28/);
   assert.match(source, /placementQualityWeight = 250/);
+  assert.match(source, /compactnessWeight = 350/);
+  assert.match(source, /adjacencyWeight = 35/);
+  assert.match(source, /gapPenaltyWeight = 18/);
   assert.match(source, /frontValueWeight = 1\.25/);
   assert.match(source, /rangeOrderWeight = 120/);
   assert.match(source, /rangeOrderTolerance = 1/);
@@ -694,8 +706,8 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /helper\.GetDps\(unit\.name, statModel, info, unit\.mutation, traitInfo\)/);
   assert.match(source, /local lowRange = rangeSpan > 0 and \(maxRange - range\) \/ rangeSpan or 0/);
   assert.match(source, /candidate\.frontPriority = lowRange \* \(tonumber\(Config\.bestLineup\.frontRangeWeight\) or 0\.72\)/);
-  assert.match(source, /return Feature\.getLineupPlacementScore\(candidate, a, gridMap, metrics\) > Feature\.getLineupPlacementScore\(candidate, b, gridMap, metrics\)/);
-  assert.match(source, /state\.score \+ candidate\.score \+ cellsAdded \* \(tonumber\(Config\.bestLineup\.fillWeight\) or 0\) \+ Feature\.getLineupPlacementScore\(candidate, placement, gridMap, metrics\)/);
+  assert.match(source, /return scoreA > scoreB/);
+  assert.match(source, /state\.score \+ candidate\.score \+ cellsAdded \* \(tonumber\(Config\.bestLineup\.fillWeight\) or 0\) \+ Feature\.getLineupPlacementScore\(candidate, placement, gridMap, metrics, state\.occupancy\)/);
   assert.doesNotMatch(source, /- derived\.cooldown \* \(tonumber\(Config\.bestLineup\.cooldownWeight\)/);
   assert.match(source, /derived\.dps > b\.derived\.dps/);
   assert.match(source, /candidate\.placementOptions/);
@@ -757,10 +769,68 @@ test("best lineup optimizer explores front-heavy variants before accepting a pla
   assert.match(source, /function Feature\.selectBestLineupPlan/);
   assert.match(source, /function Feature\.buildBestLineupMultiVariantPlan/);
   assert.match(source, /Feature\.buildBestLineupBeamPlan\(ordered, cells, gridMap, baseOccupancy, fillCandidates, metrics\)/);
-  assert.match(source, /Feature\.selectBestLineupPlan\(plans, baseOccupancy\)/);
+  assert.match(source, /Feature\.selectBestLineupPlan\(plans, baseOccupancy, gridMap\)/);
   assert.match(source, /addFrom\(byFrontNeed, math\.max\(1, tonumber\(Config\.bestLineup\.frontCandidateLimit\) or limit\)\)/);
   assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates, metrics\)/);
   assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)/);
+});
+
+test("best lineup optimizer penalizes sparse plans and favors compact placement options", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /compactnessWeight = 350/);
+  assert.match(source, /adjacencyWeight = 35/);
+  assert.match(source, /gapPenaltyWeight = 18/);
+  assert.match(source, /function Feature\.getLineupPlacementCompactnessScore/);
+  assert.match(source, /function Feature\.getLineupPlanSpaceScore/);
+  assert.match(source, /Feature\.getLineupPlacementCompactnessScore\(a, occupancy, gridMap\)/);
+  assert.match(source, /Feature\.getLineupPlanSpaceScore\(plan, gridMap, baseOccupancy\)/);
+  assert.match(source, /local compactA = Feature\.getLineupPlacementCompactnessScore\(a, occupancy, gridMap\)/);
+  assert.match(source, /local planSpaceScore = Feature\.getLineupPlanSpaceScore\(plan, gridMap, baseOccupancy\)/);
+});
+
+test("best lineup optimizer makes unit tier dominate filler and compactness math", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /rarityTierWeight = 5000/);
+  assert.match(source, /mutationTierWeight = 800/);
+  assert.match(source, /traitTierWeight = 600/);
+  assert.match(source, /function Feature\.getLineupRarityValue/);
+  assert.match(source, /function Feature\.getLineupMutationTierValue/);
+  assert.match(source, /function Feature\.getLineupTraitTierValue/);
+  assert.match(source, /function Feature\.getLineupUnitTierScore/);
+  assert.match(source, /local tierScore = Feature\.getLineupUnitTierScore\(unit, derived\)/);
+  assert.match(source, /return statScore \+ tierScore, derived, tierScore, statScore/);
+  assert.match(source, /tierScore = tierScore/);
+  assert.match(source, /statScore = statScore \* penalty/);
+  assert.match(source, /score = tierScore \+ statScore \* penalty/);
+  assert.match(source, /function Feature\.sortLineupCandidatesByTier/);
+  assert.match(source, /addFrom\(byTier, math\.max\(1, tonumber\(Config\.bestLineup\.tierCandidateLimit\) or limit\)\)/);
+  assert.match(source, /if a\.tierScore ~= b\.tierScore then/);
+  assert.match(source, /return a\.tierScore > b\.tierScore/);
+});
+
+test("best lineup resolves character mutation and trait data through normalized aliases", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /local function normalizedLookupKey/);
+  assert.match(source, /map\[normalizedLookupKey\(name\)\] = info/);
+  assert.match(source, /map\[normalizedLookupKey\(data\.DisplayName or name\)\] = info/);
+  assert.match(source, /map\[normalizedLookupKey\(data\.DisplayName or data\.Name or name\)\] = data/);
+  assert.match(source, /State\.characterInfoByName\[name\] or State\.characterInfoByName\[normalizedLookupKey\(name\)\]/);
+  assert.match(source, /State\.mutationInfoByName\[name\] or State\.mutationInfoByName\[normalizedLookupKey\(name\)\]/);
+  assert.match(source, /State\.traitInfoByName\[name\] or State\.traitInfoByName\[normalizedLookupKey\(name\)\]/);
+  assert.match(source, /map\[normalizedLookupKey\(option\.name\)\] = option\.rarity/);
+  assert.match(source, /for name, rank in pairs\(RARITY_ORDER\) do[\s\S]*normalizeText\(name\) == clean/);
+});
+
+test("placed fighter scanning preserves known trait when the model omits it", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const scanUnits = source.match(/function State\.scanUnits\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(scanUnits, /local existing = byId\[id\]/);
+  assert.match(scanUnits, /mutation = readUnitMutation\(model, existing and existing\.mutation or "None"\)/);
+  assert.match(scanUnits, /trait = traitForCharacter\(traitMap, id, readAttr\(model, \{ "Trait", "TraitName", "Passive" \}, existing and existing\.trait or "None"\)\)/);
 });
 
 test("auto merge places the best trait unit first so its trait is preserved", () => {

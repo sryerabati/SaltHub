@@ -49,6 +49,7 @@ local Config = {
     safety = {
         remoteCooldown = 0.35,
         nativePreviewBatch = 12,
+        nativePreviewMode = "Static",
     },
     delays = {
         wave = 1.5,
@@ -116,12 +117,19 @@ local Config = {
         damageCandidateLimit = 48,
         densityCandidateLimit = 64,
         frontCandidateLimit = 96,
+        tierCandidateLimit = 128,
         fillCandidateLimit = 512,
         replacementPasses = 10,
         minReplacementGain = 0.01,
         frontRangeWeight = 0.72,
         frontDpsWeight = 0.28,
         placementQualityWeight = 250,
+        compactnessWeight = 350,
+        adjacencyWeight = 35,
+        gapPenaltyWeight = 18,
+        rarityTierWeight = 5000,
+        mutationTierWeight = 800,
+        traitTierWeight = 600,
         frontValueWeight = 1.25,
         rangeOrderWeight = 120,
         rangeOrderTolerance = 1,
@@ -208,11 +216,18 @@ local function applyBestLineupOptimizerDefaults()
     best.dpsCandidateLimit = math.max(tonumber(best.dpsCandidateLimit) or 0, 96)
     best.densityCandidateLimit = math.max(tonumber(best.densityCandidateLimit) or 0, 64)
     best.frontCandidateLimit = math.max(tonumber(best.frontCandidateLimit) or 0, 96)
+    best.tierCandidateLimit = math.max(tonumber(best.tierCandidateLimit) or 0, 128)
     best.fillCandidateLimit = math.max(tonumber(best.fillCandidateLimit) or 0, 512)
     best.replacementPasses = math.max(tonumber(best.replacementPasses) or 0, 10)
     best.frontRangeWeight = math.max(tonumber(best.frontRangeWeight) or 0, 0.72)
     best.frontDpsWeight = math.min(tonumber(best.frontDpsWeight) or 0.28, 0.28)
     best.placementQualityWeight = math.max(tonumber(best.placementQualityWeight) or 0, 250)
+    best.compactnessWeight = math.max(tonumber(best.compactnessWeight) or 0, 350)
+    best.adjacencyWeight = math.max(tonumber(best.adjacencyWeight) or 0, 35)
+    best.gapPenaltyWeight = math.max(tonumber(best.gapPenaltyWeight) or 0, 18)
+    best.rarityTierWeight = math.max(tonumber(best.rarityTierWeight) or 0, 5000)
+    best.mutationTierWeight = math.max(tonumber(best.mutationTierWeight) or 0, 800)
+    best.traitTierWeight = math.max(tonumber(best.traitTierWeight) or 0, 600)
     best.frontValueWeight = math.max(tonumber(best.frontValueWeight) or 0, 1.25)
     best.rangeOrderWeight = math.max(tonumber(best.rangeOrderWeight) or 0, 120)
     best.rangeOrderTolerance = math.max(tonumber(best.rangeOrderTolerance) or 0, 1)
@@ -479,6 +494,10 @@ local function normalizeText(value)
     return tostring(value or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+local function normalizedLookupKey(value)
+    return normalizeText(value):gsub("%s+", "")
+end
+
 local function normalizeUnitMutation(value, fallback)
     local text = tostring(value or "")
     if text == "" then
@@ -575,7 +594,17 @@ local TRAIT_RARITY_FALLBACK = {
 }
 
 local function rarityRank(rarity)
-    return RARITY_ORDER[tostring(rarity or "")] or 999
+    local text = tostring(rarity or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if RARITY_ORDER[text] then
+        return RARITY_ORDER[text]
+    end
+    local clean = normalizeText(text)
+    for name, rank in pairs(RARITY_ORDER) do
+        if normalizeText(name) == clean then
+            return rank
+        end
+    end
+    return 999
 end
 
 local function rarityColor(rarity)
@@ -910,12 +939,15 @@ function DataSource.buildCharacterInfoMap(charactersInfo)
         if type(units) == "table" then
             for name, data in pairs(units) do
                 if type(name) == "string" and name ~= "" and type(data) == "table" then
-                    map[name] = {
+                    local info = {
                         name = name,
                         displayName = tostring(data.DisplayName or name),
                         rarity = tostring(rarity),
                         data = data,
                     }
+                    map[name] = info
+                    map[normalizedLookupKey(name)] = info
+                    map[normalizedLookupKey(data.DisplayName or name)] = info
                 end
             end
         end
@@ -932,6 +964,8 @@ function DataSource.buildNamedInfoMap(info, rootKey)
     for name, data in pairs(source) do
         if type(name) == "string" and name ~= "" and type(data) == "table" then
             map[name] = data
+            map[normalizedLookupKey(name)] = data
+            map[normalizedLookupKey(data.DisplayName or data.Name or name)] = data
         end
     end
     return map
@@ -997,6 +1031,7 @@ function DataSource.rarityMapFromOptions(options)
     local map = {}
     for _, option in ipairs(options or {}) do
         map[option.name] = option.rarity
+        map[normalizedLookupKey(option.name)] = option.rarity
     end
     return map
 end
@@ -1396,7 +1431,7 @@ function State.scanUnits()
                             name = tostring(readAttr(model, { "CharacterName", "Name" }, model.Name)),
                             level = tostring(readAttr(model, { "Level", "Lvl" }, "?")),
                             mutation = readUnitMutation(model, existing and existing.mutation or "None"),
-                            trait = traitForCharacter(traitMap, id, readAttr(model, { "Trait", "TraitName", "Passive" }, "None")),
+                            trait = traitForCharacter(traitMap, id, readAttr(model, { "Trait", "TraitName", "Passive" }, existing and existing.trait or "None")),
                             locked = readAttr(model, { "Locked", "IsLocked" }, false) == true,
                             equipped = true,
                             placed = true,
@@ -2784,7 +2819,22 @@ function Feature.attachAntiAfk()
 end
 
 function Feature.getNativeMenuRootNames()
-    return { "Inventory", "Inventory_Old", "Clone", "Selection" }
+    return {
+        "Inventory",
+        "Inventory_Old",
+        "Clone",
+        "Selection",
+        "Shop",
+        "Index",
+        "RandomAnime",
+        "ExclusiveEgg",
+        "Craft",
+        "Battlepass",
+        "Rewards",
+        "Quests",
+        "Trading",
+        "Trade",
+    }
 end
 
 function Feature.getNativeMenuFrameRoot()
@@ -2838,10 +2888,74 @@ function Feature.stopNativePreviewTracks(animationOwner)
     end
 end
 
+function Feature.getNativePreviewMode()
+    local mode = tostring(Config.safety.nativePreviewMode or "Static")
+    local normalized = normalizeText(mode)
+    if normalized == "hide" or normalized == "hidden" or normalized == "ultra low" or normalized == "ultralow" then
+        return "Hide"
+    end
+    return "Static"
+end
+
+function Feature.setNativePreviewMode(mode)
+    local normalized = normalizeText(mode)
+    Config.safety.nativePreviewMode = (normalized == "hide" or normalized == "hidden" or normalized == "ultra low" or normalized == "ultralow") and "Hide" or "Static"
+    Feature.optimizeNativeMenuPreviews(Config.safety.nativePreviewBatch)
+    Log.push("Native preview mode: " .. Config.safety.nativePreviewMode)
+end
+
+function Feature.restoreNativePreviewVisibility(viewport)
+    if not viewport or not viewport:IsA("ViewportFrame") then
+        return
+    end
+
+    if viewport:GetAttribute("SaltHubHadOriginalVisible") == true then
+        local originalVisible = viewport:GetAttribute("SaltHubOriginalVisible")
+        if originalVisible ~= nil then
+            pcall(function()
+                viewport.Visible = originalVisible == true
+            end)
+        end
+    end
+end
+
+function Feature.hideNativePreviewViewport(viewport)
+    if not viewport or not viewport:IsA("ViewportFrame") then
+        return false
+    end
+
+    if viewport:GetAttribute("SaltHubHadOriginalVisible") ~= true then
+        viewport:SetAttribute("SaltHubHadOriginalVisible", true)
+        viewport:SetAttribute("SaltHubOriginalVisible", viewport.Visible == true)
+    end
+
+    viewport:SetAttribute("SaltHubStaticPreview", true)
+    viewport:SetAttribute("SaltHubHiddenPreview", true)
+    pcall(function()
+        viewport.Visible = false
+    end)
+
+    local worldModel = viewport:FindFirstChild("WorldModel")
+    if worldModel then
+        pcall(function()
+            worldModel:ClearAllChildren()
+        end)
+    end
+
+    return true
+end
+
 function Feature.freezeNativePreviewViewport(viewport)
     if not Config.flags.optimizeNativeMenus or not viewport or not viewport:IsA("ViewportFrame") then
         return false
     end
+
+    if Feature.getNativePreviewMode() == "Hide" then
+        return Feature.hideNativePreviewViewport(viewport)
+    end
+
+    Feature.restoreNativePreviewVisibility(viewport)
+    viewport:SetAttribute("SaltHubHiddenPreview", false)
 
     local worldModel = viewport:FindFirstChild("WorldModel")
     if not worldModel then
@@ -4402,7 +4516,8 @@ function Feature.getCharacterStaticInfo(unitName)
     if not State.characterInfoByName or not next(State.characterInfoByName) then
         State.loadSharedInfo()
     end
-    return State.characterInfoByName[tostring(unitName or "")]
+    local name = tostring(unitName or "")
+    return State.characterInfoByName[name] or State.characterInfoByName[normalizedLookupKey(name)]
 end
 
 function Feature.getMutationInfo(mutationName)
@@ -4413,7 +4528,7 @@ function Feature.getMutationInfo(mutationName)
     if not State.mutationInfoByName or not next(State.mutationInfoByName) then
         State.loadSharedInfo()
     end
-    return State.mutationInfoByName[name]
+    return State.mutationInfoByName[name] or State.mutationInfoByName[normalizedLookupKey(name)]
 end
 
 function Feature.getTraitInfo(traitName)
@@ -4424,7 +4539,7 @@ function Feature.getTraitInfo(traitName)
     if not State.traitInfoByName or not next(State.traitInfoByName) then
         State.loadSharedInfo()
     end
-    return State.traitInfoByName[name]
+    return State.traitInfoByName[name] or State.traitInfoByName[normalizedLookupKey(name)]
 end
 
 function Feature.getLevelDamage(baseDamage, level)
@@ -4866,6 +4981,45 @@ function Feature.refreshPlacementOccupancy(gridMap)
     return occupancy
 end
 
+function Feature.getLineupRarityValue(rarity)
+    local rank = rarityRank(rarity)
+    if rank >= 999 then
+        return 0
+    end
+    return math.max(0, 10 - rank)
+end
+
+function Feature.getLineupMutationTierValue(mutationName)
+    local info = Feature.getMutationInfo(mutationName)
+    local rarity = info and (info.Rarity or info.rarity or info.Tier or info.tier)
+    local rarityValue = Feature.getLineupRarityValue(rarity)
+    local multiplier = math.max(tonumber(info and (info.DamageMultiplier or info.Multiplier or info.Damage)) or 1, 1)
+    return rarityValue + math.max(0, multiplier - 1)
+end
+
+function Feature.getLineupTraitTierValue(traitName)
+    local info = Feature.getTraitInfo(traitName)
+    local rarity = (info and (info.Rarity or info.rarity or info.Tier or info.tier))
+        or State.traitRarity and State.traitRarity[tostring(traitName or "")]
+        or State.traitRarity and State.traitRarity[normalizedLookupKey(traitName)]
+        or TRAIT_RARITY_FALLBACK[tostring(traitName or "")]
+    local rarityValue = Feature.getLineupRarityValue(rarity)
+    local damage = math.max(tonumber(info and info.Damage) or 1, 1)
+    local cooldown = math.max(tonumber(info and info.Cooldown) or 1, 0.05)
+    local range = math.max(tonumber(info and info.Range) or 1, 1)
+    local critChance = math.max(tonumber(info and info.CritChance) or 0, 0)
+    local critDamage = math.max(tonumber(info and info.CritDamage) or 1, 1)
+    local statValue = math.max(0, damage - 1) + math.max(0, 1 - cooldown) + math.max(0, range - 1) * 0.25
+        + (critChance / 100) * math.max(0, critDamage - 1)
+    return rarityValue + statValue
+end
+
+function Feature.getLineupUnitTierScore(unit, derived)
+    return Feature.getLineupRarityValue(derived and derived.rarity) * (tonumber(Config.bestLineup.rarityTierWeight) or 0)
+        + Feature.getLineupMutationTierValue(unit and unit.mutation) * (tonumber(Config.bestLineup.mutationTierWeight) or 0)
+        + Feature.getLineupTraitTierValue(unit and unit.trait) * (tonumber(Config.bestLineup.traitTierWeight) or 0)
+end
+
 function Feature.scoreLineupUnit(unit)
     local derived = Feature.computeUnitDerivedStats(unit)
     if not derived then
@@ -4876,7 +5030,7 @@ function Feature.scoreLineupUnit(unit)
     local rngBonus = derived.rng > 0 and (1 / math.max(derived.rng, 0.001)) * (tonumber(Config.bestLineup.rngWeight) or 0) or 0
     local areaBonus = (derived.splashRadius * 0.18) + (derived.lineWidth * 0.12)
     local cadenceBonus = derived.cooldown > 0 and (1 / math.max(derived.cooldown, 0.05)) * (tonumber(Config.bestLineup.cooldownWeight) or 0) or 0
-    local score = derived.dps * (tonumber(Config.bestLineup.dpsWeight) or 1)
+    local statScore = derived.dps * (tonumber(Config.bestLineup.dpsWeight) or 1)
         + derived.damage * (tonumber(Config.bestLineup.damageWeight) or 0.12)
         + derived.range * (tonumber(Config.bestLineup.rangeWeight) or 0)
         + cadenceBonus
@@ -4884,8 +5038,9 @@ function Feature.scoreLineupUnit(unit)
         + (tonumber(derived.level) or 1) * (tonumber(Config.bestLineup.levelWeight) or 0)
         + rngBonus
         + areaBonus
+    local tierScore = Feature.getLineupUnitTierScore(unit, derived)
 
-    return score, derived
+    return statScore + tierScore, derived, tierScore, statScore
 end
 
 function Feature.getLineupFrontReferencePosition(cells)
@@ -5050,24 +5205,152 @@ function Feature.getLineupPlacementMinFrontScore(placement, gridMap, metrics)
     return found and lowest or 0
 end
 
+function Feature.areLineupCellsAdjacent(a, b)
+    if not (a and b and a:IsA("BasePart") and b:IsA("BasePart")) then
+        return false
+    end
+
+    local dx = math.abs(a.Position.X - b.Position.X)
+    local dz = math.abs(a.Position.Z - b.Position.Z)
+    local xTouch = dx <= ((a.Size.X + b.Size.X) * 0.55 + 0.2)
+    local zTouch = dz <= ((a.Size.Z + b.Size.Z) * 0.55 + 0.2)
+    local sameColumn = dx <= (math.min(a.Size.X, b.Size.X) * 0.35 + 0.2)
+    local sameRow = dz <= (math.min(a.Size.Z, b.Size.Z) * 0.35 + 0.2)
+    return (xTouch and sameRow) or (zTouch and sameColumn)
+end
+
+function Feature.getLineupPlacementCompactnessScore(placement, occupancy, gridMap)
+    local placementCells = {}
+    local placementSet = {}
+    for _, cellName in ipairs(placement and placement.occupiedCells or {}) do
+        local cell = gridMap and gridMap[cellName]
+        if cell and cell:IsA("BasePart") then
+            placementSet[cellName] = true
+            table.insert(placementCells, cell)
+        end
+    end
+    if #placementCells == 0 then
+        return 0
+    end
+
+    local adjacentEdges = 0
+    local existingCells = 0
+    for cellName in pairs(occupancy or {}) do
+        if not placementSet[cellName] then
+            local existingCell = gridMap and gridMap[cellName]
+            if existingCell and existingCell:IsA("BasePart") then
+                existingCells += 1
+                for _, placementCell in ipairs(placementCells) do
+                    if Feature.areLineupCellsAdjacent(placementCell, existingCell) then
+                        adjacentEdges += 1
+                    end
+                end
+            end
+        end
+    end
+
+    local internalEdges = 0
+    for i = 1, #placementCells do
+        for j = i + 1, #placementCells do
+            if Feature.areLineupCellsAdjacent(placementCells[i], placementCells[j]) then
+                internalEdges += 1
+            end
+        end
+    end
+
+    local score = (adjacentEdges + internalEdges * 0.25) / math.max(#placementCells, 1)
+    if existingCells > 0 and adjacentEdges == 0 then
+        score -= #placementCells * 0.5
+    end
+    return score
+end
+
+function Feature.getLineupPlanSpaceScore(plan, gridMap, baseOccupancy)
+    local used = {}
+    for cellName in pairs(baseOccupancy or {}) do
+        if gridMap and gridMap[cellName] then
+            used[cellName] = true
+        end
+    end
+
+    local hasPlanCells = false
+    for _, item in ipairs(plan or {}) do
+        for _, cellName in ipairs(item and item.placement and item.placement.occupiedCells or {}) do
+            if gridMap and gridMap[cellName] then
+                used[cellName] = true
+                hasPlanCells = true
+            end
+        end
+    end
+    if not hasPlanCells then
+        return 0
+    end
+
+    local minX, maxX = math.huge, -math.huge
+    local minZ, maxZ = math.huge, -math.huge
+    local stepX, stepZ = math.huge, math.huge
+    local usedCount = 0
+    local cells = {}
+    for cellName in pairs(used) do
+        local cell = gridMap and gridMap[cellName]
+        if cell and cell:IsA("BasePart") then
+            usedCount += 1
+            table.insert(cells, cell)
+            minX = math.min(minX, cell.Position.X)
+            maxX = math.max(maxX, cell.Position.X)
+            minZ = math.min(minZ, cell.Position.Z)
+            maxZ = math.max(maxZ, cell.Position.Z)
+            stepX = math.min(stepX, math.max(cell.Size.X, 0.001))
+            stepZ = math.min(stepZ, math.max(cell.Size.Z, 0.001))
+        end
+    end
+    if usedCount == 0 or minX == math.huge then
+        return 0
+    end
+
+    local columns = math.max(1, math.floor((maxX - minX) / math.max(stepX, 0.001) + 0.5) + 1)
+    local rows = math.max(1, math.floor((maxZ - minZ) / math.max(stepZ, 0.001) + 0.5) + 1)
+    local boundingArea = math.max(usedCount, columns * rows)
+    local gapCount = math.max(0, boundingArea - usedCount)
+    local density = usedCount / math.max(boundingArea, 1)
+
+    local adjacencyEdges = 0
+    for i = 1, #cells do
+        for j = i + 1, #cells do
+            if Feature.areLineupCellsAdjacent(cells[i], cells[j]) then
+                adjacencyEdges += 1
+            end
+        end
+    end
+
+    return density * (tonumber(Config.bestLineup.compactnessWeight) or 0)
+        + (adjacencyEdges / math.max(usedCount, 1)) * (tonumber(Config.bestLineup.adjacencyWeight) or 0)
+        - gapCount * (tonumber(Config.bestLineup.gapPenaltyWeight) or 0)
+end
+
 function Feature.getLineupPlacementValue(candidate)
     local scoreValue = (tonumber(candidate and candidate.score) or 0) * (tonumber(Config.bestLineup.frontValueWeight) or 1.25)
     local dpsValue = (tonumber(candidate and candidate.derived and candidate.derived.dps) or 0)
     return math.max(scoreValue, dpsValue)
 end
 
-function Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+function Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
     local frontScore = Feature.getLineupPlacementFrontScore(placement, gridMap, metrics)
     local flatValue = tonumber(Config.bestLineup.placementQualityWeight) or 0
     return frontScore * (tonumber(candidate and candidate.frontPriority) or 0) * (flatValue + Feature.getLineupPlacementValue(candidate))
 end
 
-function Feature.sortBestLineupPlacementOptions(candidate, options, gridMap, metrics)
+function Feature.sortBestLineupPlacementOptions(candidate, options, gridMap, metrics, occupancy)
     table.sort(options, function(a, b)
-        local scoreA = Feature.getLineupPlacementScore(candidate, a, gridMap, metrics)
-        local scoreB = Feature.getLineupPlacementScore(candidate, b, gridMap, metrics)
+        local scoreA = Feature.getLineupPlacementScore(candidate, a, gridMap, metrics, occupancy)
+        local scoreB = Feature.getLineupPlacementScore(candidate, b, gridMap, metrics, occupancy)
         if scoreA ~= scoreB then
-            return Feature.getLineupPlacementScore(candidate, a, gridMap, metrics) > Feature.getLineupPlacementScore(candidate, b, gridMap, metrics)
+            return scoreA > scoreB
+        end
+        local compactA = Feature.getLineupPlacementCompactnessScore(a, occupancy, gridMap)
+        local compactB = Feature.getLineupPlacementCompactnessScore(b, occupancy, gridMap)
+        if compactA ~= compactB then
+            return compactA > compactB
         end
         local countA = #(a.occupiedCells or {})
         local countB = #(b.occupiedCells or {})
@@ -5250,7 +5533,7 @@ function Feature.getBestLineupPlacementOptions(candidate, cells, gridMap, occupa
                 table.insert(options, placement)
             end
         end
-        return Feature.sortBestLineupPlacementOptions(candidate, options, gridMap, metrics)
+        return Feature.sortBestLineupPlacementOptions(candidate, options, gridMap, metrics, occupancy)
     end
 
     for _, cell in ipairs(cells or {}) do
@@ -5274,7 +5557,7 @@ function Feature.getBestLineupPlacementOptions(candidate, cells, gridMap, occupa
             end
         end
     end
-    return Feature.sortBestLineupPlacementOptions(candidate, options, gridMap, metrics)
+    return Feature.sortBestLineupPlacementOptions(candidate, options, gridMap, metrics, occupancy)
 end
 
 function Feature.prepareBestLineupCandidatePlacements(candidates, cells, gridMap, metrics)
@@ -5289,7 +5572,7 @@ function Feature.buildBestLineupCandidates(includeEquipped)
     local allCandidates = {}
     for _, unit in ipairs(State.characters) do
         if not unit.crafting and not unit.cloning and (includeEquipped or not unit.equipped) then
-            local score, derived = Feature.scoreLineupUnit(unit)
+            local score, derived, tierScore, statScore = Feature.scoreLineupUnit(unit)
             local footprint = Feature.getShapeFootprint(unit.name)
             if score and footprint then
                 local spots = math.max(footprint.spots or 1, 1)
@@ -5298,13 +5581,17 @@ function Feature.buildBestLineupCandidates(includeEquipped)
                     unit = unit,
                     derived = derived,
                     footprint = footprint,
-                    score = score * penalty,
-                    scorePerSpot = score * penalty / spots,
+                    tierScore = tierScore,
+                    statScore = statScore * penalty,
+                    score = tierScore + statScore * penalty,
+                    scorePerSpot = (tierScore + statScore * penalty) / math.max(spots ^ 0.5, 1),
                 })
             end
         end
     end
     Feature.assignLineupFrontPriorities(allCandidates)
+
+    local byTier = Feature.sortLineupCandidatesByTier(allCandidates)
 
     local byDps = copyArray(allCandidates)
     table.sort(byDps, function(a, b)
@@ -5364,6 +5651,7 @@ function Feature.buildBestLineupCandidates(includeEquipped)
 
     addFrom(byDps, math.max(1, tonumber(Config.bestLineup.dpsCandidateLimit) or limit))
     addFrom(byDamage, math.max(1, tonumber(Config.bestLineup.damageCandidateLimit) or limit))
+    addFrom(byTier, math.max(1, tonumber(Config.bestLineup.tierCandidateLimit) or limit))
     addFrom(byFrontNeed, math.max(1, tonumber(Config.bestLineup.frontCandidateLimit) or limit))
     addFrom(byDensity, math.max(1, tonumber(Config.bestLineup.densityCandidateLimit) or limit))
     if #candidates < limit then
@@ -5371,6 +5659,9 @@ function Feature.buildBestLineupCandidates(includeEquipped)
     end
 
     table.sort(candidates, function(a, b)
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
         if a.derived.dps ~= b.derived.dps then
             return a.derived.dps > b.derived.dps
         end
@@ -5485,7 +5776,7 @@ function Feature.getLineupPlanStats(plan, baseOccupancy)
     return occupancy, selected, itemSet
 end
 
-function Feature.scoreBestLineupPlan(plan)
+function Feature.scoreBestLineupPlan(plan, gridMap, baseOccupancy)
     local total = 0
     local fillWeight = tonumber(Config.bestLineup.fillWeight) or 0
     for _, item in ipairs(plan or {}) do
@@ -5493,6 +5784,8 @@ function Feature.scoreBestLineupPlan(plan)
         total += (tonumber(item and item.score) or 0) + #cells * fillWeight + (tonumber(item and item.placementScore) or 0)
     end
     total += Feature.getLineupRangeOrderScore(plan) * (tonumber(Config.bestLineup.rangeOrderWeight) or 0)
+    local planSpaceScore = Feature.getLineupPlanSpaceScore(plan, gridMap, baseOccupancy)
+    total += planSpaceScore
     return total
 end
 
@@ -5525,9 +5818,31 @@ function Feature.getLineupRangeOrderScore(plan)
     return -penalty
 end
 
+function Feature.sortLineupCandidatesByTier(candidates)
+    local ordered = copyArray(candidates or {})
+    table.sort(ordered, function(a, b)
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
+        if a.score ~= b.score then
+            return a.score > b.score
+        end
+        local dpsA = tonumber(a and a.derived and a.derived.dps) or 0
+        local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
+        if dpsA ~= dpsB then
+            return dpsA > dpsB
+        end
+        return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
+    end)
+    return ordered
+end
+
 function Feature.sortLineupCandidatesByScore(candidates)
     local ordered = copyArray(candidates or {})
     table.sort(ordered, function(a, b)
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
         if a.score ~= b.score then
             return a.score > b.score
         end
@@ -5545,6 +5860,9 @@ end
 function Feature.sortLineupCandidatesByFrontNeed(candidates)
     local ordered = copyArray(candidates or {})
     table.sort(ordered, function(a, b)
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
         local frontA = (tonumber(a and a.frontPriority) or 0) * (tonumber(a and a.score) or 0)
         local frontB = (tonumber(b and b.frontPriority) or 0) * (tonumber(b and b.score) or 0)
         if frontA ~= frontB then
@@ -5621,7 +5939,7 @@ function Feature.rebuildBestLineupPlanByRange(plan, candidates, cells, gridMap, 
         local placement = options[1]
         if placement then
             local item = Feature.makeLineupPlanItem(candidate, placement, gridMap, metrics)
-            item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+            item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
             table.insert(rebuilt, item)
             for _, cellName in ipairs(placement.occupiedCells or {}) do
                 occupancy[cellName] = item
@@ -5630,7 +5948,7 @@ function Feature.rebuildBestLineupPlanByRange(plan, candidates, cells, gridMap, 
     end
 
     rebuilt = Feature.fillBestLineupPlan(rebuilt, candidates, cells, gridMap, placementLimit, baseOccupancy, metrics)
-    if Feature.scoreBestLineupPlan(rebuilt) > Feature.scoreBestLineupPlan(plan) then
+    if Feature.scoreBestLineupPlan(rebuilt, gridMap, baseOccupancy) > Feature.scoreBestLineupPlan(plan, gridMap, baseOccupancy) then
         return rebuilt
     end
     return plan or {}
@@ -5663,7 +5981,7 @@ function Feature.fillBestLineupPlan(plan, candidates, cells, gridMap, maxPlaceme
             local placement = options[1]
             if placement and not Feature.shouldSkipLineupFillerPlacement(candidate, placement, gridMap, metrics) then
                 local item = Feature.makeLineupPlanItem(candidate, placement, gridMap, metrics)
-                item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+                item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
                 table.insert(filled, item)
                 selected[id] = true
                 for _, cellName in ipairs(placement.occupiedCells or {}) do
@@ -5679,6 +5997,9 @@ end
 function Feature.sortLineupBackfillCandidates(candidates)
     local ordered = copyArray(candidates or {})
     table.sort(ordered, function(a, b)
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
         local rangeA = tonumber(a and a.derived and a.derived.range) or 0
         local rangeB = tonumber(b and b.derived and b.derived.range) or 0
         if rangeA ~= rangeB then
@@ -5718,7 +6039,7 @@ function Feature.fillBestLineupBackfillPlan(plan, candidates, cells, gridMap, ma
             local placement = options[1]
             if placement then
                 local item = Feature.makeLineupPlanItem(candidate, placement, gridMap, metrics)
-                item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+                item.placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
                 item.backfill = true
                 table.insert(filled, item)
                 selected[id] = true
@@ -5796,7 +6117,7 @@ function Feature.improveBestLineupPlan(plan, candidates, cells, gridMap, maxPlac
                 for _, placement in ipairs(options or {}) do
                     local blockers, hardBlocked = Feature.getLineupPlacementBlockers(placement, occupancy, itemSet)
                     if not hardBlocked and blockers and #blockers > 0 and #improved - #blockers + 1 <= placementLimit then
-                        local candidateValue = (tonumber(candidate.score) or 0) + #(placement.occupiedCells or {}) * (tonumber(Config.bestLineup.fillWeight) or 0) + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+                        local candidateValue = (tonumber(candidate.score) or 0) + #(placement.occupiedCells or {}) * (tonumber(Config.bestLineup.fillWeight) or 0) + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
                         local removedValue = Feature.scoreLineupPlanItems(blockers)
                         local gain = candidateValue - removedValue
                         if gain > bestGain then
@@ -5818,7 +6139,7 @@ function Feature.improveBestLineupPlan(plan, candidates, cells, gridMap, maxPlac
 
         improved = Feature.copyLineupPlanWithout(improved, bestReplacement.blockers)
         local item = Feature.makeLineupPlanItem(bestReplacement.candidate, bestReplacement.placement, gridMap, metrics)
-        item.placementScore = Feature.getLineupPlacementScore(bestReplacement.candidate, bestReplacement.placement, gridMap, metrics)
+        item.placementScore = Feature.getLineupPlacementScore(bestReplacement.candidate, bestReplacement.placement, gridMap, metrics, Feature.getLineupPlanStats(improved, baseOccupancy))
         table.insert(improved, item)
         improved = Feature.fillBestLineupPlan(improved, candidates, cells, gridMap, placementLimit, baseOccupancy, metrics)
     end
@@ -5850,13 +6171,13 @@ function Feature.buildBestLineupBeamPlan(candidates, cells, gridMap, baseOccupan
                         occupancy[cellName] = candidate.unit
                     end
                     local plan = copyArray(state.plan)
-                    local placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics)
+                    local placementScore = Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, state.occupancy)
                     local item = Feature.makeLineupPlanItem(candidate, placement, gridMap, metrics)
                     item.placementScore = placementScore
                     table.insert(plan, item)
                     local cellsAdded = #placement.occupiedCells
                     table.insert(nextStates, {
-                        score = state.score + candidate.score + cellsAdded * (tonumber(Config.bestLineup.fillWeight) or 0) + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics),
+                        score = state.score + candidate.score + cellsAdded * (tonumber(Config.bestLineup.fillWeight) or 0) + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, state.occupancy),
                         cellsUsed = state.cellsUsed + cellsAdded,
                         plan = plan,
                         occupancy = occupancy,
@@ -5886,6 +6207,7 @@ function Feature.getBestLineupCandidateOrderVariants(candidates)
     end
 
     addVariant(candidates)
+    addVariant(Feature.sortLineupCandidatesByTier(candidates))
     addVariant(Feature.sortLineupCandidatesByFrontNeed(candidates))
     addVariant(Feature.sortLineupCandidatesByScore(candidates))
 
@@ -5932,12 +6254,12 @@ function Feature.getBestLineupCandidateOrderVariants(candidates)
     return variants
 end
 
-function Feature.selectBestLineupPlan(plans, baseOccupancy)
+function Feature.selectBestLineupPlan(plans, baseOccupancy, gridMap)
     local bestPlan = {}
     local bestScore = -math.huge
     local bestCells = -math.huge
     for _, plan in ipairs(plans or {}) do
-        local score = Feature.scoreBestLineupPlan(plan)
+        local score = Feature.scoreBestLineupPlan(plan, gridMap, baseOccupancy)
         local occupancy = Feature.getLineupPlanStats(plan, baseOccupancy)
         local cells = 0
         for _ in pairs(occupancy or {}) do
@@ -5957,7 +6279,7 @@ function Feature.buildBestLineupMultiVariantPlan(candidates, cells, gridMap, bas
     for _, ordered in ipairs(Feature.getBestLineupCandidateOrderVariants(candidates)) do
         table.insert(plans, Feature.buildBestLineupBeamPlan(ordered, cells, gridMap, baseOccupancy, fillCandidates, metrics))
     end
-    return Feature.selectBestLineupPlan(plans, baseOccupancy)
+    return Feature.selectBestLineupPlan(plans, baseOccupancy, gridMap)
 end
 
 function Feature.getBestLineupPlan()
@@ -7965,6 +8287,9 @@ local Tabs = {
             UI.toggle(ui, "Optimize Native Menus", function()
                 return Config.flags.optimizeNativeMenus
             end, Feature.setNativeMenuOptimizerEnabled)
+            UI.cycle(ui, "Native Preview Mode", function()
+                return { "Static", "Hide" }
+            end, Feature.getNativePreviewMode, Feature.setNativePreviewMode)
             UI.slider(ui, "Anti-AFK Interval", function()
                 return Config.delays.antiAfkCooldown
             end, function(value)
