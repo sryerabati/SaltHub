@@ -365,8 +365,9 @@ local function applyPresetFromGlobal()
 end
 
 local presetApplied = applyPresetFromGlobal()
-if not presetApplied then
-    applySavedConfigFromWorkspace()
+local savedConfigApplied = applySavedConfigFromWorkspace()
+if presetApplied and savedConfigApplied then
+    workspaceConfigStatus = tostring(workspaceConfigStatus) .. " (overrode launch preset)"
 end
 applyBestLineupOptimizerDefaults()
 
@@ -422,6 +423,33 @@ local function uniqueSorted(list)
     table.sort(out, function(a, b)
         return tostring(a):lower() < tostring(b):lower()
     end)
+    return out
+end
+
+local function normalizeUnitMutationTargets(targets)
+    local out = {}
+    if type(targets) ~= "table" then
+        return out
+    end
+
+    for unit, mutations in pairs(targets) do
+        local unitName = tostring(unit or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if unitName ~= "" and type(mutations) == "table" then
+            local mutationList = {}
+            for _, mutation in ipairs(mutations) do
+                local mutationName = tostring(mutation or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                if mutationName ~= "" then
+                    table.insert(mutationList, mutationName)
+                end
+            end
+
+            local clean = uniqueSorted(mutationList)
+            if #clean > 0 then
+                out[unitName] = clean
+            end
+        end
+    end
+
     return out
 end
 
@@ -2565,6 +2593,8 @@ function Feature.saveConfigToWorkspace(reason, quiet)
         return false
     end
 
+    Config.roll.unitMutationTargets = normalizeUnitMutationTargets(Config.roll.unitMutationTargets)
+
     local ok, encoded = pcall(function()
         return HttpService:JSONEncode(Feature.getSerializableConfig())
     end)
@@ -2574,23 +2604,39 @@ function Feature.saveConfigToWorkspace(reason, quiet)
     end
 
     local lastErr = nil
+    local savedPaths = {}
     for _, path in ipairs(getExecutorConfigCandidatePaths()) do
-        local folder = getExecutorFolderFromPath(path)
-        local folderOk, folderErr = ensureExecutorConfigFolder(folder)
-        if folderOk then
-            local saveOk, saveErr = pcall(writefile, path, encoded)
-            if saveOk then
-                State.lastConfigSaveAt = os.clock()
-                State.lastConfigSavePath = path
-                if not quiet then
-                    Log.push("Settings saved to executor workspace: " .. tostring(path))
-                end
-                return true
-            end
-            lastErr = saveErr
-        else
-            lastErr = folderErr
+        local shouldTry = #savedPaths == 0
+        if not shouldTry and type(isfile) == "function" then
+            local okExists, exists = pcall(isfile, path)
+            shouldTry = okExists and exists == true
         end
+
+        if shouldTry then
+            local folder = getExecutorFolderFromPath(path)
+            local folderOk, folderErr = ensureExecutorConfigFolder(folder)
+            if folderOk then
+                local saveOk, saveErr = pcall(writefile, path, encoded)
+                if saveOk then
+                    table.insert(savedPaths, path)
+                else
+                    lastErr = saveErr
+                end
+            else
+                lastErr = folderErr
+            end
+        end
+    end
+
+    if #savedPaths > 0 then
+        State.lastConfigSaveAt = os.clock()
+        State.lastConfigSavePath = savedPaths[1]
+        State.lastConfigSavePaths = savedPaths
+        State.lastConfigSaveError = nil
+        if not quiet then
+            Log.push("Settings saved to executor workspace: " .. table.concat(savedPaths, ", "))
+        end
+        return true
     end
 
     State.lastConfigSaveError = tostring(lastErr or "unknown writefile failure")
@@ -3000,6 +3046,7 @@ end
 function Feature.applyAutoRollSettingsLocal()
     Config.roll.targetUnits = uniqueSorted(Config.roll.targetUnits)
     Config.roll.targetMutations = uniqueSorted(Config.roll.targetMutations)
+    Config.roll.unitMutationTargets = normalizeUnitMutationTargets(Config.roll.unitMutationTargets)
     Config.roll.snipeEvents = uniqueSorted(Config.roll.snipeEvents)
     Log.push("Auto Roll filters saved locally.")
 end

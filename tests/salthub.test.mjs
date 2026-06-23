@@ -299,6 +299,9 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   assert.match(source, /State\.pityHoldUntil/);
   assert.doesNotMatch(source, /"Detected Podium"/);
   assert.match(source, /unitMutationTargets = \{\}/);
+  assert.match(source, /local function normalizeUnitMutationTargets\(targets\)/);
+  assert.match(source, /local clean = uniqueSorted\(mutationList\)/);
+  assert.match(source, /Config\.roll\.unitMutationTargets = normalizeUnitMutationTargets\(Config\.roll\.unitMutationTargets\)/);
   assert.match(source, /function UI\.unitMutationSelector/);
   assert.match(source, /UI\.unitMutationSelector\(.*"Target Units"/s);
   assert.match(source, /UI\.multiSelectList\(page, "Snipe Events"/);
@@ -997,7 +1000,7 @@ test("settings export copies a reusable launch script with embedded preset", () 
   assert.match(source, /"Copy Launch Script"/);
 });
 
-test("settings auto save to executor workspace and load when no preset exists", () => {
+test("settings auto save to executor workspace and override launch presets", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /storage = \{/);
@@ -1012,10 +1015,16 @@ test("settings auto save to executor workspace and load when no preset exists", 
   assert.match(source, /writefile/);
   assert.match(source, /makefolder/);
   assert.match(source, /for _, path in ipairs\(getExecutorConfigCandidatePaths\(\)\) do/);
-  assert.match(source, /State\.lastConfigSavePath = path/);
+  assert.match(source, /local savedPaths = \{\}/);
+  assert.match(source, /local shouldTry = #savedPaths == 0/);
+  assert.match(source, /State\.lastConfigSavePath = savedPaths\[1\]/);
+  assert.match(source, /State\.lastConfigSavePaths = savedPaths/);
+  assert.match(source, /table\.concat\(savedPaths, ", "\)/);
   assert.match(source, /State\.lastConfigSaveError = tostring\(lastErr or "unknown writefile failure"\)/);
   assert.match(source, /local presetApplied = applyPresetFromGlobal\(\)/);
-  assert.match(source, /if not presetApplied then\s+applySavedConfigFromWorkspace\(\)/);
+  assert.match(source, /local savedConfigApplied = applySavedConfigFromWorkspace\(\)/);
+  assert.match(source, /if presetApplied and savedConfigApplied then\s+workspaceConfigStatus = tostring\(workspaceConfigStatus\) \.\. " \(overrode launch preset\)"/);
+  assert.doesNotMatch(source, /if not presetApplied then\s+applySavedConfigFromWorkspace\(\)/);
   assert.match(source, /function Feature\.saveConfigToWorkspace/);
   assert.match(source, /function Feature\.scheduleConfigSave/);
   assert.match(source, /Feature\.scheduleConfigSave\("ui:" \.\. tostring\(text\)\)/);
