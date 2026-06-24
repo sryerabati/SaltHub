@@ -741,6 +741,8 @@ test("best lineup placement scores combat stats and packs current grid footprint
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /bestLineup = \{/);
+  assert.match(source, /autoBestLineup = false/);
+  assert.match(source, /bestLineup = 6\.0/);
   assert.match(source, /dpsWeight = 1/);
   assert.match(source, /damageWeight = 0\.12/);
   assert.match(source, /rangeWeight = 0\.08/);
@@ -819,6 +821,8 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.pickupBestLineupUnits/);
   assert.match(source, /function Feature\.getBestLineupPlan/);
   assert.match(source, /function Feature\.placeBestLineup/);
+  assert.match(source, /function Feature\.setAutoBestLineup/);
+  assert.match(source, /State\.bestLineupRunId/);
   assert.match(source, /remote\.OnClientEvent:Connect/);
   assert.match(source, /Feature\.pickupBestLineupUnits\(\)/);
   assert.match(source, /Feature\.equipUnitForPlacement\(item\.unit\)/);
@@ -858,6 +862,12 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)/);
   assert.match(source, /Feature\.improveBestLineupPlan\(plan, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
   assert.match(source, /"Place Best Lineup"/);
+  assert.match(source, /"Start Best Lineup"/);
+  assert.match(source, /"Stop Best Lineup"/);
+  assert.match(source, /Feature\.startLoop\("autoBestLineup"[\s\S]*Config\.delays\.bestLineup[\s\S]*Feature\.placeBestLineup/);
+  assert.match(source, /Feature\.stopLoop\("autoBestLineup"\)/);
+  assert.match(source, /Feature\.loops\.autoBestLineup/);
+  assert.match(source, /if Config\.flags\.autoBestLineup then[\s\S]*Feature\.setAutoBestLineup\(true\)/);
   assert.doesNotMatch(source, /function Feature\.placeBestLineup[\s\S]*?Remote\.fire\("AutoMergeToggle"/);
 });
 

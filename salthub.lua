@@ -67,6 +67,7 @@ local Config = {
         mergeRejectBackoff = 3,
         trait = 0.75,
         upgrade = 0.7,
+        bestLineup = 6.0,
         event = 1.0,
         battlepass = 10.0,
         antiAfkCooldown = 60,
@@ -83,6 +84,7 @@ local Config = {
         autoMerge = false,
         autoTrait = false,
         autoUpgrade = false,
+        autoBestLineup = false,
         autoBuhara = false,
         autoBattlepass = false,
         optimizeNativeMenus = true,
@@ -805,6 +807,7 @@ local State = {
     buharaTargetScanAt = 0,
     buharaDropAt = 0,
     lastBestLineupSummary = "",
+    bestLineupRunId = 0,
     configSaveQueued = false,
     configSaveReason = nil,
     lastConfigSaveAt = 0,
@@ -4980,6 +4983,9 @@ function Feature.startLoadedAutomationSettings()
     if Config.flags.autoUpgrade then
         Feature.toggleUpgrade(true)
     end
+    if Config.flags.autoBestLineup then
+        Feature.setAutoBestLineup(true)
+    end
     if Config.flags.autoBuhara then
         Feature.toggleBuhara(true)
     end
@@ -6847,7 +6853,17 @@ function Feature.getBestLineupPlanFromEmptyGrid()
     return Feature.orderBestLineupPlanForPlacement(Feature.buildBestLineupMultiVariantPlan(candidates, cells, gridMap, {}, fillCandidates, metrics))
 end
 
-function Feature.placeBestLineup()
+function Feature.placeBestLineup(runId)
+    local function shouldContinue()
+        return runId == nil or (Config.flags.autoBestLineup == true and State.bestLineupRunId == runId)
+    end
+
+    if not shouldContinue() then
+        State.lastBestLineupSummary = "Best lineup stopped."
+        Log.push(State.lastBestLineupSummary)
+        return false
+    end
+
     Log.push("Planning best lineup...")
     local picked = Feature.pickupBestLineupUnits()
     if picked > 0 then
@@ -6862,6 +6878,11 @@ function Feature.placeBestLineup()
 
     local placed = 0
     for _, item in ipairs(plan) do
+        if not shouldContinue() then
+            State.lastBestLineupSummary = "Best lineup stopped."
+            Log.push(State.lastBestLineupSummary)
+            return false
+        end
         local ok = Feature.equipUnitForPlacement(item.unit) and Feature.placeCharacterAndWait(item)
         if ok then
             placed += 1
@@ -6872,6 +6893,28 @@ function Feature.placeBestLineup()
     State.lastBestLineupSummary = "Placed " .. tostring(placed) .. "/" .. tostring(#plan) .. " best lineup units."
     Log.push(State.lastBestLineupSummary)
     return placed > 0
+end
+
+function Feature.setAutoBestLineup(value)
+    Config.flags.autoBestLineup = value == true
+    if Config.flags.autoBestLineup then
+        if Feature.loops.autoBestLineup then
+            Log.push("Auto Best Lineup is already running.")
+            return true
+        end
+        State.bestLineupRunId = (State.bestLineupRunId or 0) + 1
+        local runId = State.bestLineupRunId
+        Feature.startLoop("autoBestLineup", function()
+            return Config.delays.bestLineup
+        end, function()
+            return Feature.placeBestLineup(runId)
+        end)
+        Log.push("Auto Best Lineup started.")
+    else
+        State.bestLineupRunId = (State.bestLineupRunId or 0) + 1
+        Feature.stopLoop("autoBestLineup")
+        Log.push("Auto Best Lineup stopped.")
+    end
 end
 
 function Feature.traitScore(unit)
@@ -8934,6 +8977,12 @@ local Tabs = {
             end)
             UI.button(main, "Merge Selected Target", Feature.mergeSelectedTarget, Theme.accent)
             local placement = UI.section(page, "Best Placement")
+            UI.button(placement, "Start Best Lineup", function()
+                Feature.setAutoBestLineup(true)
+            end, Theme.accent)
+            UI.button(placement, "Stop Best Lineup", function()
+                Feature.setAutoBestLineup(false)
+            end, Theme.danger)
             UI.button(placement, "Place Best Lineup", Feature.placeBestLineup, Theme.accent)
                 UI.inventoryUnitSelector(page, "Selected Merge Target", function()
                     return Feature.getMergeSelectableUnits()
