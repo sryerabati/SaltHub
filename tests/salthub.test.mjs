@@ -887,6 +887,18 @@ test("best lineup treats locked units as placeable high-damage candidates", () =
   assert.match(buildCandidates, /a\.derived\.damage > b\.derived\.damage/);
 });
 
+test("best lineup waits for waves to end before picking up placed units", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const pickupBody = source.match(/function Feature\.pickupBestLineupUnits\(\)([\s\S]*?)\nfunction Feature\.ensureBestLineupData/)?.[1] ?? "";
+  const placeBestBody = source.match(/function Feature\.placeBestLineup\(runId\)([\s\S]*?)\nfunction Feature\.setAutoBestLineup/)?.[1] ?? "";
+
+  assert.match(source, /bestLineupWaveBlockLogAt = 0/);
+  assert.match(pickupBody, /if Feature\.isWaveStarted\(\) then[\s\S]*return 0/);
+  assert.match(placeBestBody, /if Feature\.isWaveStarted\(\) then[\s\S]*Best lineup waiting for wave to end before picking up units/);
+  assert.match(placeBestBody, /State\.bestLineupWaveBlockLogAt == 0 or now - \(State\.bestLineupWaveBlockLogAt or 0\) >= 10/);
+  assert.match(placeBestBody, /Feature\.isWaveStarted\(\)[\s\S]*Feature\.pickupBestLineupUnits\(\)/);
+});
+
 test("best lineup optimizer defaults preserve damage tuning after imports", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 

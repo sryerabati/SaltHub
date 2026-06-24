@@ -811,6 +811,7 @@ local State = {
     buharaDropAt = 0,
     lastBestLineupSummary = "",
     bestLineupRunId = 0,
+    bestLineupWaveBlockLogAt = 0,
     configSaveQueued = false,
     configSaveReason = nil,
     lastConfigSaveAt = 0,
@@ -5958,6 +5959,10 @@ function Feature.placeCharacterAndWait(item)
 end
 
 function Feature.pickupBestLineupUnits()
+    if Feature.isWaveStarted() then
+        return 0
+    end
+
     State.scanUnits()
     local picked = 0
     local character = LocalPlayer.Character
@@ -6953,6 +6958,16 @@ function Feature.placeBestLineup(runId)
     if not shouldContinue() then
         State.lastBestLineupSummary = "Best lineup stopped."
         Log.push(State.lastBestLineupSummary)
+        return false
+    end
+
+    if Feature.isWaveStarted() then
+        State.lastBestLineupSummary = "Best lineup waiting for wave to end before picking up units."
+        local now = os.clock()
+        if State.bestLineupWaveBlockLogAt == 0 or now - (State.bestLineupWaveBlockLogAt or 0) >= 10 then
+            State.bestLineupWaveBlockLogAt = now
+            Log.push(State.lastBestLineupSummary)
+        end
         return false
     end
 
