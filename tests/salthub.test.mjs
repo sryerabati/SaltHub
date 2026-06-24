@@ -612,19 +612,34 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.match(source, /function Feature\.findPendingBuyCandidate/);
   assert.match(source, /function Feature\.setPendingBuy/);
   assert.match(source, /function Feature\.clearPendingBuy/);
+  assert.match(source, /function Feature\.extendPendingBuyHold/);
+  assert.match(source, /function Feature\.findRolledCharacterByKey/);
+  assert.match(source, /function Feature\.waitForRolledCharacterGone/);
   assert.match(source, /function Feature\.shouldWaitForCashToBuy/);
   assert.match(source, /Feature\.getPlayerCash\(\) < price/);
   assert.match(source, /State\.pendingBuy = \{/);
-  assert.match(source, /State\.rollBusyUntil = math\.max\(State\.rollBusyUntil or 0, os\.clock\(\) \+ \(tonumber\(Config\.delays\.buyReservePause\) or 1\.25\)\)/);
+  assert.match(source, /buyReservePause = 4\.0/);
+  assert.match(source, /buyRetryPoll = 0\.35/);
+  assert.match(source, /buyConfirmTimeout = 2\.5/);
+  assert.match(source, /buyAttemptWindow = 8\.0/);
+  assert.match(source, /expiresAt = now \+ \(tonumber\(Config\.delays\.buyAttemptWindow\) or 8\.0\)/);
+  assert.match(source, /State\.rollBusyUntil = math\.max\(State\.rollBusyUntil or 0, os\.clock\(\) \+ \(tonumber\(Config\.delays\.buyReservePause\) or 4\.0\)\)/);
+  assert.match(source, /Feature\.extendPendingBuyHold\(\)/);
+  assert.match(source, /if pending\.expiresAt and os\.clock\(\) < pending\.expiresAt then[\s\S]*?Feature\.extendPendingBuyHold\(\)[\s\S]*?return nil/);
 
   const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
   assert.match(buyBody, /if pending then[\s\S]*?return Feature\.tryBuyRolledCharacter\(pending\)/);
+  assert.match(buyBody, /if State\.pendingBuy then[\s\S]*?Feature\.extendPendingBuyHold\(\)[\s\S]*?return false/);
   assert.match(buyBody, /local match = Feature\.findMatchingRolledCharacter\(\)/);
+  assert.match(buyBody, /Feature\.setPendingBuy\(match\)/);
   assert.match(buyBody, /return Feature\.tryBuyRolledCharacter\(match\)/);
 
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(rollBody, /if State\.pendingBuy then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
+
+  const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(delayBody, /if State\.buyingCharacter or State\.pendingBuy then[\s\S]*?return tonumber\(Config\.delays\.buyRetryPoll\) or 0\.35/);
 });
 
 test("auto roll reserves and teleports to wanted buys before rolling again", () => {
@@ -632,14 +647,17 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const buyBody = source.match(/function Feature\.buyRolledCharacter\(entry\)([\s\S]*?)\nfunction Feature\.getRollPityEntries/)?.[1] ?? "";
 
-  assert.match(source, /buyReservePause = 1\.25/);
+  assert.match(source, /buyReservePause = 4\.0/);
   assert.match(source, /function Feature\.reserveBuyBeforeRolling/);
   assert.match(source, /function Feature\.teleportToPrompt/);
   assert.match(rollBody, /local reserved = Feature\.reserveBuyBeforeRolling\(\)/);
   assert.match(rollBody, /if reserved then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
   assert.match(rollBody, /Feature\.rollOnce\(\)/);
-  assert.match(buyBody, /Feature\.teleportToPrompt\(entry\.prompt, 3\.15\)/);
+  assert.match(buyBody, /local current = Feature\.findRolledCharacterByKey\(key\) or entry/);
+  assert.match(buyBody, /Feature\.teleportToPrompt\(current\.prompt, 3\.15\)/);
+  assert.match(buyBody, /if prompted and Feature\.waitForRolledCharacterGone\(key, tonumber\(Config\.delays\.buyConfirmTimeout\) or 2\.5\) then/);
   assert.doesNotMatch(buyBody, /Feature\.moveNearInstance\(entry\.prompt, 3\.15\)/);
+  assert.doesNotMatch(buyBody, /bought = Feature\.holdPrompt\(entry\.prompt\)/);
 });
 
 test("one-time buttons are removed from primary pages", () => {

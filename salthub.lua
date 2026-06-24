@@ -58,7 +58,12 @@ local Config = {
         roll = 0.12,
         buyScan = 0.12,
         rollSettle = 0.55,
-        buyReservePause = 1.25,
+        buyReservePause = 4.0,
+        buyRetryPoll = 0.35,
+        buyConfirmTimeout = 2.5,
+        buyAttemptWindow = 8.0,
+        buyPromptRetries = 4,
+        buyPromptRetryDelay = 0.18,
         pityHoldPoll = 1.0,
         eventScanInterval = 4.0,
         buyPause = 0.9,
@@ -4458,16 +4463,41 @@ function Feature.getRolledCharacterKey(entry)
     return normalizeText(tostring(entry.name) .. "|" .. tostring(entry.mutation))
 end
 
+function Feature.findRolledCharacterByKey(key)
+    if not key or key == "" then
+        return nil
+    end
+
+    for _, entry in ipairs(Feature.getRolledCharacters()) do
+        if Feature.getRolledCharacterKey(entry) == key and Feature.matchesRollTarget(entry) then
+            return entry
+        end
+    end
+    return nil
+end
+
+function Feature.extendPendingBuyHold()
+    if not State.pendingBuy then
+        return
+    end
+    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyReservePause) or 4.0))
+end
+
 function Feature.findPendingBuyCandidate()
     local pending = State.pendingBuy
     if not pending or not pending.key then
         return nil
     end
 
-    for _, entry in ipairs(Feature.getRolledCharacters()) do
-        if Feature.getRolledCharacterKey(entry) == pending.key and Feature.matchesRollTarget(entry) then
-            return entry
-        end
+    local entry = Feature.findRolledCharacterByKey(pending.key)
+    if entry then
+        Feature.extendPendingBuyHold()
+        return entry
+    end
+
+    if pending.expiresAt and os.clock() < pending.expiresAt then
+        Feature.extendPendingBuyHold()
+        return nil
     end
 
     Feature.clearPendingBuy()
@@ -4479,17 +4509,20 @@ function Feature.setPendingBuy(entry)
         return
     end
 
+    local now = os.clock()
     local price = Feature.getRolledCharacterPrice(entry)
     State.pendingBuy = {
         key = Feature.getRolledCharacterKey(entry),
         name = entry.name,
         mutation = entry.mutation,
         price = price,
+        createdAt = now,
+        expiresAt = now + (tonumber(Config.delays.buyAttemptWindow) or 8.0),
     }
-    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyReservePause) or 1.25))
+    Feature.extendPendingBuyHold()
 
-    if price and Feature.getPlayerCash() < price and os.clock() - (State.lastPendingBuyLogAt or 0) > 3 then
-        State.lastPendingBuyLogAt = os.clock()
+    if price and Feature.getPlayerCash() < price and now - (State.lastPendingBuyLogAt or 0) > 3 then
+        State.lastPendingBuyLogAt = now
         Log.push("Waiting for cash to buy " .. tostring(entry.name) .. " (" .. tostring(entry.price or "?") .. ").")
     end
 end
@@ -4529,7 +4562,7 @@ function Feature.reserveBuyBeforeRolling()
 
     local pending = Feature.findPendingBuyCandidate()
     if pending then
-        State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyReservePause) or 1.25))
+        Feature.extendPendingBuyHold()
         return pending
     end
 
@@ -4539,6 +4572,22 @@ function Feature.reserveBuyBeforeRolling()
         return match
     end
     return nil
+end
+
+function Feature.waitForRolledCharacterGone(key, timeout)
+    if not key or key == "" then
+        return false
+    end
+
+    local deadline = os.clock() + (tonumber(timeout) or (tonumber(Config.delays.buyConfirmTimeout) or 2.5))
+    repeat
+        if not Feature.findRolledCharacterByKey(key) then
+            return true
+        end
+        task.wait(0.08)
+    until os.clock() >= deadline
+
+    return not Feature.findRolledCharacterByKey(key)
 end
 
 function Feature.buyRolledCharacter(entry)
@@ -4551,23 +4600,37 @@ function Feature.buyRolledCharacter(entry)
     end
 
     State.buyingCharacter = true
-    State.rollBusyUntil = os.clock() + (tonumber(Config.delays.buyPause) or 0.9)
+    Feature.extendPendingBuyHold()
     local bought = false
     local ok, err = pcall(function()
-        Feature.teleportToPrompt(entry.prompt, 3.15)
-        task.wait(0.05)
-        bought = Feature.holdPrompt(entry.prompt)
-        if bought then
-            State.lastBuyAt = os.clock()
-            Log.push("Held E to buy " .. tostring(entry.name) .. ".")
+        local key = Feature.getRolledCharacterKey(entry)
+        local maxAttempts = math.max(tonumber(Config.delays.buyPromptRetries) or 4, 1)
+        for attempt = 1, maxAttempts do
+            local current = Feature.findRolledCharacterByKey(key) or entry
+            if not current or not current.prompt then
+                break
+            end
+
+            Feature.extendPendingBuyHold()
+            Feature.teleportToPrompt(current.prompt, 3.15)
+            task.wait(0.12)
+            local prompted = Feature.holdPrompt(current.prompt)
+            Feature.extendPendingBuyHold()
+            if prompted and Feature.waitForRolledCharacterGone(key, tonumber(Config.delays.buyConfirmTimeout) or 2.5) then
+                bought = true
+                State.lastBuyAt = os.clock()
+                Log.push("Bought " .. tostring(current.name) .. ".")
+                break
+            end
+            task.wait(tonumber(Config.delays.buyPromptRetryDelay) or 0.18)
         end
-        task.wait(0.08)
+        task.wait(0.12)
         Feature.returnToRollStation()
     end)
     if not ok then
         Log.push("Buy failed: " .. tostring(err))
     end
-    State.rollBusyUntil = os.clock() + (tonumber(Config.delays.buyPause) or 0.9)
+    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyPause) or 0.9))
     State.buyingCharacter = false
     return bought
 end
@@ -4885,6 +4948,9 @@ end
 
 function Feature.getAutoRollLoopDelay()
     local baseDelay = tonumber(Config.delays.roll) or 0.12
+    if State.buyingCharacter or State.pendingBuy then
+        return tonumber(Config.delays.buyRetryPoll) or 0.35
+    end
     local holdRemaining = (tonumber(State.pityHoldUntil) or 0) - os.clock()
     if holdRemaining > baseDelay then
         return math.max(baseDelay, holdRemaining)
@@ -4992,9 +5058,14 @@ function Feature.autoBuyStep()
     if pending then
         return Feature.tryBuyRolledCharacter(pending)
     end
+    if State.pendingBuy then
+        Feature.extendPendingBuyHold()
+        return false
+    end
 
     local match = Feature.findMatchingRolledCharacter()
     if match then
+        Feature.setPendingBuy(match)
         return Feature.tryBuyRolledCharacter(match)
     end
     return false
