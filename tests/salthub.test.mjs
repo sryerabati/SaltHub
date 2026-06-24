@@ -1185,6 +1185,9 @@ test("auto merge pauses during native menus, backs off, and cleans dirty merge a
   assert.match(source, /lastNativeMenuPauseLogAt = 0/);
   assert.match(source, /function Feature\.isNativeMenuOpen/);
   assert.match(source, /function Feature\.pauseMergeForNativeMenu/);
+  const nativeMenuOpenBody = source.match(/function Feature\.isNativeMenuOpen\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(nativeMenuOpenBody, /Feature\.getNativeMenuRootNames\(\)/);
+  assert.doesNotMatch(nativeMenuOpenBody, /frames:GetChildren\(\)/);
   assert.match(source, /function Feature\.backoffMerge/);
   assert.match(source, /function Feature\.cleanupFailedMergeAttempt/);
   assert.match(source, /humanoid:UnequipTools\(\)/);

@@ -3219,8 +3219,9 @@ function Feature.isNativeMenuOpen()
         return false
     end
 
-    for _, root in ipairs(frames:GetChildren()) do
-        if root:IsA("GuiObject") and root.Visible == true then
+    for _, name in ipairs(Feature.getNativeMenuRootNames()) do
+        local root = frames:FindFirstChild(name)
+        if root and root:IsA("GuiObject") and root.Visible == true then
             return true
         end
     end
