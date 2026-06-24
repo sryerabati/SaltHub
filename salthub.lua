@@ -58,6 +58,7 @@ local Config = {
         roll = 0.12,
         buyScan = 0.12,
         rollSettle = 0.55,
+        buyReservePause = 1.25,
         pityHoldPoll = 1.0,
         eventScanInterval = 4.0,
         buyPause = 0.9,
@@ -4175,6 +4176,27 @@ function Feature.moveNearInstance(instance, distance, allowTeleportFallback)
     return Feature.moveToCFrame(CFrame.lookAt(targetPosition, targetPart.Position), Config.delays.moveTimeout, allowTeleportFallback)
 end
 
+function Feature.teleportToPrompt(prompt, distance)
+    local root = Feature.getCharacterRoot()
+    local targetPart = Feature.getTargetPart(prompt)
+    if not root or not targetPart then
+        Log.push("Buy prompt target was not found.")
+        return false
+    end
+
+    local direction = root.Position - targetPart.Position
+    if direction.Magnitude < 0.1 then
+        direction = -targetPart.CFrame.LookVector
+    else
+        direction = direction.Unit
+    end
+
+    local offset = math.max(tonumber(distance) or 3.15, 0.75)
+    local targetPosition = targetPart.Position + direction * offset
+    targetPosition = Vector3.new(targetPosition.X, targetPart.Position.Y, targetPosition.Z)
+    return Feature.teleportToCFrame(CFrame.lookAt(targetPosition, targetPart.Position))
+end
+
 function Feature.returnToRollStation()
     local station = Feature.getRollStationCFrame()
     if not station then
@@ -4464,9 +4486,9 @@ function Feature.setPendingBuy(entry)
         mutation = entry.mutation,
         price = price,
     }
-    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.rollSettle) or 0.55))
+    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyReservePause) or 1.25))
 
-    if os.clock() - (State.lastPendingBuyLogAt or 0) > 3 then
+    if price and Feature.getPlayerCash() < price and os.clock() - (State.lastPendingBuyLogAt or 0) > 3 then
         State.lastPendingBuyLogAt = os.clock()
         Log.push("Waiting for cash to buy " .. tostring(entry.name) .. " (" .. tostring(entry.price or "?") .. ").")
     end
@@ -4500,6 +4522,25 @@ function Feature.tryBuyRolledCharacter(entry)
     return bought
 end
 
+function Feature.reserveBuyBeforeRolling()
+    if not Config.flags.autoBuy then
+        return nil
+    end
+
+    local pending = Feature.findPendingBuyCandidate()
+    if pending then
+        State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyReservePause) or 1.25))
+        return pending
+    end
+
+    local match = Feature.findMatchingRolledCharacter()
+    if match then
+        Feature.setPendingBuy(match)
+        return match
+    end
+    return nil
+end
+
 function Feature.buyRolledCharacter(entry)
     if not entry or not entry.prompt then
         Log.push("No matching podium character to buy.")
@@ -4513,7 +4554,7 @@ function Feature.buyRolledCharacter(entry)
     State.rollBusyUntil = os.clock() + (tonumber(Config.delays.buyPause) or 0.9)
     local bought = false
     local ok, err = pcall(function()
-        Feature.moveNearInstance(entry.prompt, 3.15)
+        Feature.teleportToPrompt(entry.prompt, 3.15)
         task.wait(0.05)
         bought = Feature.holdPrompt(entry.prompt)
         if bought then
@@ -4875,6 +4916,12 @@ function Feature.autoRollStep()
     end
 
     State.pityHoldUntil = 0
+
+    local reserved = Feature.reserveBuyBeforeRolling()
+    if reserved then
+        Feature.autoBuyStep()
+        return
+    end
 
     local bought = Feature.autoBuyStep()
     if bought then
@@ -8055,6 +8102,11 @@ function Feature.executeMergePlan(plan)
     return true
 end
 
+function Feature.finishAutoMergeSweep()
+    Log.push("Auto merge finished every anime.")
+    Feature.toggleAutoMerge(false)
+end
+
 function Feature.autoMergeStep()
     local now = os.clock()
     if now < (State.mergeRejectedUntil or 0) then
@@ -8075,8 +8127,7 @@ function Feature.autoMergeStep()
     if tostring(pending.characterName or "") == "" then
         local family = Feature.findNextAutoMergeFamily(nil, nil, State.autoMergeIgnoredCharacters)
         if not family then
-            State.autoMergeIgnoredCharacters = {}
-            State.autoMergeIdleUntil = now + (tonumber(Config.delays.mergeIdle) or 2.5)
+            Feature.finishAutoMergeSweep()
             return false
         end
         pending.characterName = family.characterName
@@ -8679,7 +8730,15 @@ function Feature.clearBuharaHoldBackoff()
     State.buharaHoldUntil = 0
 end
 
+function Feature.shouldPauseBuharaForAutoMerge()
+    return Config.flags.autoMerge == true
+end
+
 function Feature.getAutoBuharaLoopDelay()
+    if Feature.shouldPauseBuharaForAutoMerge() then
+        return math.max(tonumber(Config.delays.mergeIdle) or 2.5, tonumber(Config.delays.event) or 1)
+    end
+
     local now = os.clock()
     local holdUntil = tonumber(State.buharaHoldUntil) or 0
     if holdUntil > now then
@@ -8721,6 +8780,10 @@ function Feature.feedBuhara(forceAttempt)
 end
 
 function Feature.autoBuharaStep()
+    if Feature.shouldPauseBuharaForAutoMerge() then
+        return false
+    end
+
     if Feature.isCarryingBuharaFood() then
         return Feature.feedBuhara()
     end

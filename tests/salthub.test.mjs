@@ -615,7 +615,7 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.match(source, /function Feature\.shouldWaitForCashToBuy/);
   assert.match(source, /Feature\.getPlayerCash\(\) < price/);
   assert.match(source, /State\.pendingBuy = \{/);
-  assert.match(source, /State\.rollBusyUntil = math\.max\(State\.rollBusyUntil or 0, os\.clock\(\) \+ \(tonumber\(Config\.delays\.rollSettle\) or 0\.55\)\)/);
+  assert.match(source, /State\.rollBusyUntil = math\.max\(State\.rollBusyUntil or 0, os\.clock\(\) \+ \(tonumber\(Config\.delays\.buyReservePause\) or 1\.25\)\)/);
 
   const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
@@ -625,6 +625,21 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
 
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(rollBody, /if State\.pendingBuy then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
+});
+
+test("auto roll reserves and teleports to wanted buys before rolling again", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const buyBody = source.match(/function Feature\.buyRolledCharacter\(entry\)([\s\S]*?)\nfunction Feature\.getRollPityEntries/)?.[1] ?? "";
+
+  assert.match(source, /buyReservePause = 1\.25/);
+  assert.match(source, /function Feature\.reserveBuyBeforeRolling/);
+  assert.match(source, /function Feature\.teleportToPrompt/);
+  assert.match(rollBody, /local reserved = Feature\.reserveBuyBeforeRolling\(\)/);
+  assert.match(rollBody, /if reserved then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
+  assert.match(rollBody, /Feature\.rollOnce\(\)/);
+  assert.match(buyBody, /Feature\.teleportToPrompt\(entry\.prompt, 3\.15\)/);
+  assert.doesNotMatch(buyBody, /Feature\.moveNearInstance\(entry\.prompt, 3\.15\)/);
 });
 
 test("one-time buttons are removed from primary pages", () => {
@@ -1293,11 +1308,22 @@ test("auto merge does not immediately reselect a completed character in the same
   assert.match(source, /function Feature\.findNextAutoMergeFamily\(characterName, ignoredFamilies, ignoredCharacters\)/);
   assert.match(autoMergeStep, /Feature\.findNextAutoMergeFamily\(nil, nil, State\.autoMergeIgnoredCharacters\)/);
   assert.match(autoMergeStep, /State\.autoMergeIgnoredCharacters\[pending\.characterName\] = true/);
-  assert.match(autoMergeStep, /State\.autoMergeIgnoredCharacters = \{\}/);
+  assert.match(autoMergeStep, /Feature\.finishAutoMergeSweep\(\)/);
   assert.match(toggleAutoMerge, /State\.autoMergeIgnoredCharacters = \{\}/);
 });
 
-test("auto merge backs off when idle instead of rescanning every merge tick", () => {
+test("auto merge turns itself off after the full anime sweep", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const finishBody = source.match(/function Feature\.finishAutoMergeSweep\(\)([\s\S]*?)\nfunction Feature\.autoMergeStep/)?.[1] ?? "";
+  const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.finishAutoMergeSweep/);
+  assert.match(finishBody, /Log\.push\("Auto merge finished every anime\."\)/);
+  assert.match(finishBody, /Feature\.toggleAutoMerge\(false\)/);
+  assert.match(autoMergeStep, /if not family then[\s\S]*?Feature\.finishAutoMergeSweep\(\)[\s\S]*?return false/);
+});
+
+test("auto merge keeps idle guard but finishes instead of rescanning after sweep", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const toggleAutoMerge = source.match(/function Feature\.toggleAutoMerge\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
@@ -1305,7 +1331,8 @@ test("auto merge backs off when idle instead of rescanning every merge tick", ()
   assert.match(source, /mergeIdle = 2\.5/);
   assert.match(source, /autoMergeIdleUntil = 0/);
   assert.match(autoMergeStep, /if now < \(State\.autoMergeIdleUntil or 0\) then/);
-  assert.match(autoMergeStep, /State\.autoMergeIdleUntil = now \+ \(tonumber\(Config\.delays\.mergeIdle\) or 2\.5\)/);
+  assert.match(autoMergeStep, /Feature\.finishAutoMergeSweep\(\)/);
+  assert.doesNotMatch(autoMergeStep, /State\.autoMergeIdleUntil = now \+ \(tonumber\(Config\.delays\.mergeIdle\) or 2\.5\)/);
   assert.match(toggleAutoMerge, /State\.autoMergeIdleUntil = 0/);
 });
 
@@ -1551,6 +1578,19 @@ test("auto buhara backs off missing target checks while holding food", () => {
   assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara feed prompt was not found yet; holding food\."\)/);
   assert.match(toggleBody, /Feature\.startLoop\("autoBuhara", Feature\.getAutoBuharaLoopDelay, Feature\.autoBuharaStep\)/);
   assert.doesNotMatch(toggleBody, /return Config\.delays\.event/);
+});
+
+test("auto buhara does no backend work while auto merge duplicates is enabled", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const delayBody = source.match(/function Feature\.getAutoBuharaLoopDelay\(\)([\s\S]*?)\nfunction Feature\.feedBuhara/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoBuharaStep\(\)([\s\S]*?)\nfunction Feature\.toggleBuhara/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.shouldPauseBuharaForAutoMerge/);
+  assert.match(delayBody, /if Feature\.shouldPauseBuharaForAutoMerge\(\) then[\s\S]*?return math\.max\(tonumber\(Config\.delays\.mergeIdle\) or 2\.5, tonumber\(Config\.delays\.event\) or 1\)/);
+  assert.match(stepBody, /if Feature\.shouldPauseBuharaForAutoMerge\(\) then[\s\S]*?return false/);
+  assert.match(stepBody, /Feature\.isCarryingBuharaFood\(\)/);
+  assert.ok(stepBody.indexOf("Feature.shouldPauseBuharaForAutoMerge()") < stepBody.indexOf("Feature.isCarryingBuharaFood()"));
+  assert.ok(stepBody.indexOf("Feature.shouldPauseBuharaForAutoMerge()") < stepBody.indexOf("Feature.getBuharaData()"));
 });
 
 test("auto start wave is gated by owned plot wave state", () => {

@@ -128,14 +128,17 @@ test("auto merge keeps one character active until its mutation families are exha
   assert.match(autoMergeStep, /Feature\.pickupAutoMergeBoardUnits\(pending\.characterName\)/);
 });
 
-test("auto merge has an idle backoff to avoid repeated heavy rescans", () => {
+test("auto merge stops after sweep instead of repeated heavy rescans", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)[\s\S]*?\nend/)?.[0] ?? "";
+  const finishAutoMergeSweep = source.match(/function Feature\.finishAutoMergeSweep\(\)[\s\S]*?\nend/)?.[0] ?? "";
 
   assert.match(source, /mergeIdle = 2\.5/);
   assert.match(source, /autoMergeIdleUntil = 0/);
   assert.match(autoMergeStep, /State\.autoMergeIdleUntil/);
-  assert.match(autoMergeStep, /Config\.delays\.mergeIdle/);
+  assert.match(autoMergeStep, /Feature\.finishAutoMergeSweep\(\)/);
+  assert.match(finishAutoMergeSweep, /Feature\.toggleAutoMerge\(false\)/);
+  assert.doesNotMatch(autoMergeStep, /State\.autoMergeIdleUntil = now \+ \(tonumber\(Config\.delays\.mergeIdle\) or 2\.5\)/);
 });
 
 test("merge placement scans beyond the first free cell for shapes that need neighbors", () => {
