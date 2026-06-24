@@ -57,7 +57,7 @@ local Config = {
         wave = 1.5,
         roll = 0.12,
         buyScan = 0.12,
-        rollSettle = 0.55,
+        rollSettle = 1.25,
         buyReservePause = 4.0,
         fastRollBuyHold = 2.75,
         buyRetryPoll = 0.35,
@@ -4352,7 +4352,7 @@ function Feature.rollOnce()
     local ok = Feature.holdPrompt(prompt)
     if ok then
         State.lastRollAt = os.clock()
-        State.rollBusyUntil = State.lastRollAt + (tonumber(Config.delays.rollSettle) or 0.55)
+        State.rollBusyUntil = State.lastRollAt + (tonumber(Config.delays.rollSettle) or 1.25)
         Log.push("Held E on Roll.")
     end
     return ok
@@ -5110,7 +5110,7 @@ function Feature.shouldRollAgain()
     if os.clock() < (State.rollBusyUntil or 0) then
         return false
     end
-    return os.clock() - (State.lastRollAt or 0) >= (tonumber(Config.delays.rollSettle) or 0.55)
+    return os.clock() - (State.lastRollAt or 0) >= (tonumber(Config.delays.rollSettle) or 1.25)
 end
 
 function Feature.autoBuyStep()

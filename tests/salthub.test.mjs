@@ -583,7 +583,7 @@ test("auto roll settles between rolls and auto buy can run independently", () =>
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /buyScan = 0\.12/);
-  assert.match(source, /rollSettle = 0\.55/);
+  assert.match(source, /rollSettle = 1\.25/);
   assert.match(source, /buyPause = 0\.9/);
 
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
