@@ -743,7 +743,8 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /bestLineup = \{/);
   assert.match(source, /autoBestLineup = false/);
   assert.match(source, /bestLineup = 6\.0/);
-  assert.match(source, /dpsWeight = 1/);
+  assert.match(source, /dpsWeight = 1\.25/);
+  assert.match(source, /dpsPerCellWeight = 0\.85/);
   assert.match(source, /damageWeight = 0\.12/);
   assert.match(source, /rangeWeight = 0\.08/);
   assert.match(source, /cooldownWeight = 3/);
@@ -792,6 +793,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /function Feature\.getShapeOccupiedCellNames/);
   assert.match(source, /function Feature\.refreshPlacementOccupancy/);
   assert.match(source, /function Feature\.scoreLineupUnit/);
+  assert.match(source, /function Feature\.getLineupDpsDensityScore/);
   assert.match(source, /function Feature\.getLineupFrontReferencePosition/);
   assert.match(source, /local fullName = normalizeText\(descendant:GetFullName\(\)\)/);
   assert.match(source, /fullName:find\("enemyspawn", 1, true\)/);
@@ -836,6 +838,9 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /Feature\.getCellByOffset/);
   assert.match(source, /1 \/ math\.max\(derived\.cooldown/);
   assert.match(source, /derived\.damage \* \(tonumber\(Config\.bestLineup\.damageWeight\) or 0\.12\)/);
+  assert.match(source, /derived\.dps \* \(tonumber\(Config\.bestLineup\.dpsWeight\) or 1\.25\)/);
+  assert.match(source, /dpsPerCell = dpsPerCell/);
+  assert.match(source, /dpsDensityScore = dpsDensityScore/);
   assert.match(source, /local byDamage = copyArray\(allCandidates\)/);
   assert.match(source, /addFrom\(byDamage, math\.max\(1, tonumber\(Config\.bestLineup\.damageCandidateLimit\) or limit\)\)/);
   assert.match(source, /State\.characterStatsUiHelper[\s\S]*GetDps/);
@@ -843,7 +848,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /local lowRange = rangeSpan > 0 and \(maxRange - range\) \/ rangeSpan or 0/);
   assert.match(source, /candidate\.frontPriority = lowRange \* \(tonumber\(Config\.bestLineup\.frontRangeWeight\) or 0\.72\)/);
   assert.match(source, /return scoreA > scoreB/);
-  assert.match(source, /state\.score \+ candidate\.score \+ cellsAdded \* \(tonumber\(Config\.bestLineup\.fillWeight\) or 0\) \+ Feature\.getLineupPlacementScore\(candidate, placement, gridMap, metrics, state\.occupancy\)/);
+  assert.match(source, /state\.score \+ Feature\.getLineupPlanItemValue\(candidate, placement, gridMap, metrics, state\.occupancy\)/);
   assert.doesNotMatch(source, /- derived\.cooldown \* \(tonumber\(Config\.bestLineup\.cooldownWeight\)/);
   assert.match(source, /derived\.dps > b\.derived\.dps/);
   assert.match(source, /candidate\.placementOptions/);
@@ -861,6 +866,7 @@ test("best lineup placement scores combat stats and packs current grid footprint
   assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, Feature\.refreshPlacementOccupancy\(gridMap\), fillCandidates, metrics\)/);
   assert.match(source, /Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)/);
   assert.match(source, /Feature\.improveBestLineupPlan\(plan, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
+  assert.match(source, /function Feature\.getLineupPlanItemValue/);
   assert.match(source, /"Place Best Lineup"/);
   assert.match(source, /"Start Best Lineup"/);
   assert.match(source, /"Stop Best Lineup"/);
@@ -884,6 +890,8 @@ test("best lineup treats locked units as placeable high-damage candidates", () =
 test("best lineup optimizer defaults preserve damage tuning after imports", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
+  assert.match(source, /best\.dpsWeight = math\.max\(tonumber\(best\.dpsWeight\) or 0, 1\.25\)/);
+  assert.match(source, /best\.dpsPerCellWeight = math\.max\(tonumber\(best\.dpsPerCellWeight\) or 0, 0\.85\)/);
   assert.match(source, /best\.damageWeight = tonumber\(best\.damageWeight\) or 0\.12/);
   assert.match(source, /best\.damageCandidateLimit = math\.max\(tonumber\(best\.damageCandidateLimit\) or 0, 48\)/);
   assert.match(source, /mergeConfig\(Config, decoded\.Config or decoded\)\s+applyBestLineupOptimizerDefaults\(\)/);
@@ -945,8 +953,9 @@ test("best lineup optimizer keeps unit tier as support for combat scoring", () =
   assert.match(source, /local tierScore = Feature\.getLineupUnitTierScore\(unit, derived\)/);
   assert.match(source, /return statScore \+ tierScore \* \(tonumber\(Config\.bestLineup\.tierSupportWeight\) or 0\.05\), derived, tierScore, statScore/);
   assert.match(source, /tierScore = tierScore/);
-  assert.match(source, /statScore = statScore \* penalty/);
-  assert.match(source, /score = statScore \* penalty \+ tierScore \* \(tonumber\(Config\.bestLineup\.tierSupportWeight\) or 0\.05\)/);
+  assert.match(source, /local adjustedStatScore = statScore \* penalty/);
+  assert.match(source, /local baseScore = adjustedStatScore \+ dpsDensityScore \+ tierScore \* tierSupport/);
+  assert.match(source, /score = baseScore/);
   assert.match(source, /function Feature\.sortLineupCandidatesByTier/);
   assert.match(source, /addFrom\(byTier, math\.max\(1, tonumber\(Config\.bestLineup\.tierCandidateLimit\) or limit\)\)/);
   assert.match(source, /if a\.tierScore ~= b\.tierScore then/);
@@ -981,10 +990,13 @@ test("best lineup actual combat output dominates shiny low-damage filler", () =>
 
   assert.match(scoreBody, /tierSupportWeight/);
   assert.doesNotMatch(scoreBody, /return statScore \+ tierScore, derived/);
-  assert.match(buildCandidates, /score = statScore \* penalty \+ tierScore \* \(tonumber\(Config\.bestLineup\.tierSupportWeight\) or 0\.05\)/);
+  assert.match(buildCandidates, /local dpsDensityScore, dpsPerCell = Feature\.getLineupDpsDensityScore\(derived, spots\)/);
+  assert.match(buildCandidates, /scorePerSpot = baseScore \/ math\.max\(spots, 1\)/);
   assert.match(scoreSort, /if a\.score ~= b\.score then\s+return a\.score > b\.score/);
+  assert.match(scoreSort, /if dpsPerCellA ~= dpsPerCellB then\s+return dpsPerCellA > dpsPerCellB/);
   assert.doesNotMatch(scoreSort, /if a\.tierScore ~= b\.tierScore then\s+return a\.tierScore > b\.tierScore[\s\S]*?if a\.score ~= b\.score/);
   assert.match(backfillSort, /if scoreA ~= scoreB then\s+return scoreA > scoreB/);
+  assert.match(backfillSort, /if dpsPerCellA ~= dpsPerCellB then\s+return dpsPerCellA > dpsPerCellB/);
   assert.doesNotMatch(backfillSort, /if a\.tierScore ~= b\.tierScore then\s+return a\.tierScore > b\.tierScore[\s\S]*?local scoreA/);
 });
 

@@ -108,7 +108,8 @@ local Config = {
         blacklist = {},
     },
     bestLineup = {
-        dpsWeight = 1,
+        dpsWeight = 1.25,
+        dpsPerCellWeight = 0.85,
         damageWeight = 0.12,
         rangeWeight = 0.08,
         cooldownWeight = 3,
@@ -220,6 +221,8 @@ end
 local function applyBestLineupOptimizerDefaults()
     local best = Config.bestLineup or {}
     Config.bestLineup = best
+    best.dpsWeight = math.max(tonumber(best.dpsWeight) or 0, 1.25)
+    best.dpsPerCellWeight = math.max(tonumber(best.dpsPerCellWeight) or 0, 0.85)
     best.damageWeight = tonumber(best.damageWeight) or 0.12
     best.damageCandidateLimit = math.max(tonumber(best.damageCandidateLimit) or 0, 48)
     best.beamWidth = math.max(tonumber(best.beamWidth) or 0, 192)
@@ -5515,7 +5518,7 @@ function Feature.scoreLineupUnit(unit)
     local rngBonus = derived.rng > 0 and (1 / math.max(derived.rng, 0.001)) * (tonumber(Config.bestLineup.rngWeight) or 0) or 0
     local areaBonus = (derived.splashRadius * 0.18) + (derived.lineWidth * 0.12)
     local cadenceBonus = derived.cooldown > 0 and (1 / math.max(derived.cooldown, 0.05)) * (tonumber(Config.bestLineup.cooldownWeight) or 0) or 0
-    local statScore = derived.dps * (tonumber(Config.bestLineup.dpsWeight) or 1)
+    local statScore = derived.dps * (tonumber(Config.bestLineup.dpsWeight) or 1.25)
         + derived.damage * (tonumber(Config.bestLineup.damageWeight) or 0.12)
         + derived.range * (tonumber(Config.bestLineup.rangeWeight) or 0)
         + cadenceBonus
@@ -5526,6 +5529,13 @@ function Feature.scoreLineupUnit(unit)
     local tierScore = Feature.getLineupUnitTierScore(unit, derived)
 
     return statScore + tierScore * (tonumber(Config.bestLineup.tierSupportWeight) or 0.05), derived, tierScore, statScore
+end
+
+function Feature.getLineupDpsDensityScore(derived, spots)
+    local cells = math.max(tonumber(spots) or 1, 1)
+    local dps = math.max(tonumber(derived and derived.dps) or 0, 0)
+    local dpsPerCell = dps / cells
+    return dpsPerCell * (tonumber(Config.bestLineup.dpsPerCellWeight) or 0.85), dpsPerCell
 end
 
 function Feature.getLineupFrontReferencePosition(cells)
@@ -6062,14 +6072,20 @@ function Feature.buildBestLineupCandidates(includeEquipped)
             if score and footprint then
                 local spots = math.max(footprint.spots or 1, 1)
                 local penalty = math.max(0, 1 - math.min(0.45, (spots - 1) * (tonumber(Config.bestLineup.footprintPenalty) or 0)))
+                local tierSupport = tonumber(Config.bestLineup.tierSupportWeight) or 0.05
+                local dpsDensityScore, dpsPerCell = Feature.getLineupDpsDensityScore(derived, spots)
+                local adjustedStatScore = statScore * penalty
+                local baseScore = adjustedStatScore + dpsDensityScore + tierScore * tierSupport
                 table.insert(allCandidates, {
                     unit = unit,
                     derived = derived,
                     footprint = footprint,
                     tierScore = tierScore,
-                    statScore = statScore * penalty,
-                    score = statScore * penalty + tierScore * (tonumber(Config.bestLineup.tierSupportWeight) or 0.05),
-                    scorePerSpot = (statScore * penalty + tierScore * (tonumber(Config.bestLineup.tierSupportWeight) or 0.05)) / math.max(spots ^ 0.5, 1),
+                    statScore = adjustedStatScore,
+                    dpsPerCell = dpsPerCell,
+                    dpsDensityScore = dpsDensityScore,
+                    score = baseScore,
+                    scorePerSpot = baseScore / math.max(spots, 1),
                 })
             end
         end
@@ -6082,6 +6098,9 @@ function Feature.buildBestLineupCandidates(includeEquipped)
     table.sort(byDps, function(a, b)
         if a.derived.dps ~= b.derived.dps then
             return a.derived.dps > b.derived.dps
+        end
+        if a.dpsPerCell ~= b.dpsPerCell then
+            return a.dpsPerCell > b.dpsPerCell
         end
         if a.score ~= b.score then
             return a.score > b.score
@@ -6097,6 +6116,9 @@ function Feature.buildBestLineupCandidates(includeEquipped)
         if a.derived.dps ~= b.derived.dps then
             return a.derived.dps > b.derived.dps
         end
+        if a.dpsPerCell ~= b.dpsPerCell then
+            return a.dpsPerCell > b.dpsPerCell
+        end
         if a.score ~= b.score then
             return a.score > b.score
         end
@@ -6105,6 +6127,11 @@ function Feature.buildBestLineupCandidates(includeEquipped)
 
     local byDensity = copyArray(allCandidates)
     table.sort(byDensity, function(a, b)
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         if a.scorePerSpot ~= b.scorePerSpot then
             return a.scorePerSpot > b.scorePerSpot
         end
@@ -6170,6 +6197,11 @@ function Feature.getBestLineupFillCandidates(primaryCandidates, allCandidates)
         if a.score ~= b.score then
             return a.score > b.score
         end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         if a.scorePerSpot ~= b.scorePerSpot then
             return a.scorePerSpot > b.scorePerSpot
         end
@@ -6224,6 +6256,11 @@ function Feature.makeLineupPlanItem(candidate, placement, gridMap, metrics)
         unit = candidate.unit,
         derived = candidate.derived,
         score = candidate.score,
+        statScore = candidate.statScore,
+        tierScore = candidate.tierScore,
+        dpsPerCell = candidate.dpsPerCell,
+        dpsDensityScore = candidate.dpsDensityScore,
+        scorePerSpot = candidate.scorePerSpot,
         frontPriority = candidate.frontPriority,
         frontScore = gridMap and metrics and Feature.getLineupPlacementFrontScore(placement, gridMap, metrics) or nil,
         placement = placement,
@@ -6247,12 +6284,24 @@ function Feature.getLineupPlanStats(plan, baseOccupancy)
     return occupancy, selected, itemSet
 end
 
+function Feature.getLineupPlanItemValue(candidate, placement, gridMap, metrics, occupancy)
+    local cells = placement and placement.occupiedCells or {}
+    return (tonumber(candidate and candidate.score) or 0)
+        + #cells * (tonumber(Config.bestLineup.fillWeight) or 0)
+        + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
+end
+
+function Feature.getLineupPlacedItemValue(item)
+    local cells = item and item.placement and item.placement.occupiedCells or {}
+    return (tonumber(item and item.score) or 0)
+        + #cells * (tonumber(Config.bestLineup.fillWeight) or 0)
+        + (tonumber(item and item.placementScore) or 0)
+end
+
 function Feature.scoreBestLineupPlan(plan, gridMap, baseOccupancy)
     local total = 0
-    local fillWeight = tonumber(Config.bestLineup.fillWeight) or 0
     for _, item in ipairs(plan or {}) do
-        local cells = item and item.placement and item.placement.occupiedCells or {}
-        total += (tonumber(item and item.score) or 0) + #cells * fillWeight + (tonumber(item and item.placementScore) or 0)
+        total += Feature.getLineupPlacedItemValue(item)
     end
     total += Feature.getLineupRangeOrderScore(plan) * (tonumber(Config.bestLineup.rangeOrderWeight) or 0)
     local planSpaceScore = Feature.getLineupPlanSpaceScore(plan, gridMap, baseOccupancy)
@@ -6300,6 +6349,11 @@ function Feature.sortLineupCandidatesByCombat(candidates)
         if dpsA ~= dpsB then
             return dpsA > dpsB
         end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         local damageA = tonumber(a and a.derived and a.derived.damage) or 0
         local damageB = tonumber(b and b.derived and b.derived.damage) or 0
         if damageA ~= damageB then
@@ -6328,6 +6382,11 @@ function Feature.orderBestLineupPlanForPlacement(plan)
         local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
         if dpsA ~= dpsB then
             return dpsA > dpsB
+        end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
         end
         local damageA = tonumber(a and a.derived and a.derived.damage) or 0
         local damageB = tonumber(b and b.derived and b.derived.damage) or 0
@@ -6358,6 +6417,11 @@ function Feature.sortLineupCandidatesByTier(candidates)
         if dpsA ~= dpsB then
             return dpsA > dpsB
         end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
     end)
     return ordered
@@ -6371,6 +6435,11 @@ function Feature.sortLineupCandidatesByScore(candidates)
         end
         if a.derived.dps ~= b.derived.dps then
             return a.derived.dps > b.derived.dps
+        end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
         end
         local damageA = tonumber(a and a.derived and a.derived.damage) or 0
         local damageB = tonumber(b and b.derived and b.derived.damage) or 0
@@ -6408,6 +6477,11 @@ function Feature.sortLineupCandidatesByFrontNeed(candidates)
         local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
         if dpsA ~= dpsB then
             return dpsA > dpsB
+        end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
         end
         return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
     end)
@@ -6455,6 +6529,11 @@ function Feature.rebuildBestLineupPlanByRange(plan, candidates, cells, gridMap, 
         local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
         if dpsA ~= dpsB then
             return dpsA > dpsB
+        end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
         end
         return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
     end)
@@ -6538,6 +6617,11 @@ function Feature.sortLineupBackfillCandidates(candidates)
         if dpsA ~= dpsB then
             return dpsA > dpsB
         end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         local rangeA = tonumber(a and a.derived and a.derived.range) or 0
         local rangeB = tonumber(b and b.derived and b.derived.range) or 0
         if rangeA ~= rangeB then
@@ -6619,10 +6703,8 @@ end
 
 function Feature.scoreLineupPlanItems(items)
     local total = 0
-    local fillWeight = tonumber(Config.bestLineup.fillWeight) or 0
     for _, item in ipairs(items or {}) do
-        local cells = item and item.placement and item.placement.occupiedCells or {}
-        total += (tonumber(item and item.score) or 0) + #cells * fillWeight + (tonumber(item and item.placementScore) or 0)
+        total += Feature.getLineupPlacedItemValue(item)
     end
     return total
 end
@@ -6648,7 +6730,7 @@ function Feature.improveBestLineupPlan(plan, candidates, cells, gridMap, maxPlac
                 for _, placement in ipairs(options or {}) do
                     local blockers, hardBlocked = Feature.getLineupPlacementBlockers(placement, occupancy, itemSet)
                     if not hardBlocked and blockers and #blockers > 0 and #improved - #blockers + 1 <= placementLimit then
-                        local candidateValue = (tonumber(candidate.score) or 0) + #(placement.occupiedCells or {}) * (tonumber(Config.bestLineup.fillWeight) or 0) + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, occupancy)
+                        local candidateValue = Feature.getLineupPlanItemValue(candidate, placement, gridMap, metrics, occupancy)
                         local removedValue = Feature.scoreLineupPlanItems(blockers)
                         local gain = candidateValue - removedValue
                         if gain > bestGain then
@@ -6708,7 +6790,7 @@ function Feature.buildBestLineupBeamPlan(candidates, cells, gridMap, baseOccupan
                     table.insert(plan, item)
                     local cellsAdded = #placement.occupiedCells
                     table.insert(nextStates, {
-                        score = state.score + candidate.score + cellsAdded * (tonumber(Config.bestLineup.fillWeight) or 0) + Feature.getLineupPlacementScore(candidate, placement, gridMap, metrics, state.occupancy),
+                        score = state.score + Feature.getLineupPlanItemValue(candidate, placement, gridMap, metrics, state.occupancy),
                         cellsUsed = state.cellsUsed + cellsAdded,
                         plan = plan,
                         occupancy = occupancy,
@@ -6759,12 +6841,22 @@ function Feature.getBestLineupCandidateOrderVariants(candidates)
         if dpsA ~= dpsB then
             return dpsA > dpsB
         end
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
     end)
     addVariant(byRange)
 
     local byDensity = copyArray(candidates or {})
     table.sort(byDensity, function(a, b)
+        local dpsPerCellA = tonumber(a and a.dpsPerCell) or 0
+        local dpsPerCellB = tonumber(b and b.dpsPerCell) or 0
+        if dpsPerCellA ~= dpsPerCellB then
+            return dpsPerCellA > dpsPerCellB
+        end
         if a.scorePerSpot ~= b.scorePerSpot then
             return a.scorePerSpot > b.scorePerSpot
         end
