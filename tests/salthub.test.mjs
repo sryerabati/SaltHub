@@ -1402,7 +1402,15 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /function Feature\.dropBuharaFoodIfReady/);
   assert.match(source, /function Feature\.getBuharaFoodName/);
   assert.match(source, /function Feature\.getBuharaScanRoots/);
+  assert.match(source, /"MutationStuffs"/);
+  const scanRootsBody = source.match(/function Feature\.getBuharaScanRoots\(\)([\s\S]*?)function Feature\.refreshBuharaFoodDropCache/)?.[1] ?? "";
+  assert.match(scanRootsBody, /workspace:FindFirstChild\("MutationStuffs"\)/);
+  assert.match(scanRootsBody, /:GetChildren\(\)/);
+  assert.match(scanRootsBody, /GetAttribute\("FoodName"\)/);
+  assert.match(scanRootsBody, /"FoodPickupItem"/);
   assert.match(source, /function Feature\.refreshBuharaFoodDropCache/);
+  const refreshDropsBody = source.match(/function Feature\.refreshBuharaFoodDropCache\(wantedFoods\)([\s\S]*?)function Feature\.getBuharaFoodDrops/)?.[1] ?? "";
+  assert.match(refreshDropsBody, /local scanItems = \{ scanRoot \}/);
   assert.match(source, /function Feature\.getBuharaFoodDrops/);
   assert.match(source, /function Feature\.findWantedBuharaFood/);
   assert.match(source, /function Feature\.isCarryingBuharaFood/);

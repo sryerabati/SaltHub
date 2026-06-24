@@ -8141,6 +8141,18 @@ function Feature.getBuharaScanRoots()
         end
     end
 
+    local mutationContainer = workspace:FindFirstChild("MutationStuffs")
+    if mutationContainer then
+        for _, container in ipairs(mutationContainer:GetChildren()) do
+            if container:GetAttribute("FoodName")
+                or textMatchesAny(container.Name, { "Food", "FoodPickupItem", "Ingredient", "Sandwich", "Buhara", "Burah", "Trait", "Shard" })
+            then
+                add(container)
+            end
+        end
+        add(mutationContainer)
+    end
+
     for _, name in ipairs({ "Debris", "EventAttachments", "Map", "Food", "Foods", "Drops", "BuharaEvent" }) do
         add(workspace:FindFirstChild(name))
     end
@@ -8165,7 +8177,12 @@ function Feature.refreshBuharaFoodDropCache(wantedFoods)
     local seen = {}
     local scanned = 0
     for _, scanRoot in ipairs(Feature.getBuharaScanRoots()) do
-        for _, instance in ipairs(scanRoot:GetDescendants()) do
+        local scanItems = { scanRoot }
+        for _, descendant in ipairs(scanRoot:GetDescendants()) do
+            table.insert(scanItems, descendant)
+        end
+
+        for _, instance in ipairs(scanItems) do
             scanned += 1
             if scanned > (tonumber(Config.buhara.maxScanItems) or 450) then
                 break
