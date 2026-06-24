@@ -49,8 +49,8 @@ local Config = {
     safety = {
         remoteCooldown = 0.35,
         nativeRootScanBatch = 96,
-        nativePreviewBatch = 12,
-        nativeVisualEffectBatch = 256,
+        nativePreviewBatch = 2,
+        nativeVisualEffectBatch = 32,
         nativePreviewMode = "Hide",
     },
     delays = {
@@ -252,6 +252,9 @@ end
 
 local function applyNativeMenuOptimizerSafetyDefaults()
     Config.flags.optimizeNativeMenus = true
+    Config.safety.nativeRootScanBatch = math.min(math.max(tonumber(Config.safety.nativeRootScanBatch) or 96, 1), 96)
+    Config.safety.nativePreviewBatch = math.min(math.max(tonumber(Config.safety.nativePreviewBatch) or 2, 1), 2)
+    Config.safety.nativeVisualEffectBatch = math.min(math.max(tonumber(Config.safety.nativeVisualEffectBatch) or 32, 1), 32)
     local mode = tostring(Config.safety.nativePreviewMode or ""):lower():gsub("%s+", "")
     if mode == "" or mode == "static" then
         Config.safety.nativePreviewMode = "Hide"
@@ -2677,9 +2680,12 @@ Feature = {
     nativeMenuOptimizerConnection = nil,
     nativeMenuRootConnections = {},
     nativeVisualEffectRootConnections = {},
+    nativeMenuOpenGuardConnections = {},
     nativeMenuQueuedRootScans = {},
     nativeMenuQueuedViewports = {},
     nativeMenuQueuedVisualEffects = {},
+    nativeMenuUiSuspended = false,
+    nativeMenuUiWasVisible = nil,
 }
 
 function Feature.getConfigStoragePath()
@@ -3062,13 +3068,6 @@ function Feature.hideNativePreviewViewport(viewport)
         viewport.Visible = false
     end)
 
-    local worldModel = viewport:FindFirstChild("WorldModel")
-    if worldModel then
-        pcall(function()
-            worldModel:ClearAllChildren()
-        end)
-    end
-
     return true
 end
 
@@ -3193,15 +3192,7 @@ function Feature.attachNativeMenuRoot(Root)
     end
 
     Feature.queueNativeRootScan(Root)
-    local connection = Root.DescendantAdded:Connect(function(descendant)
-        if not Config.flags.optimizeNativeMenus then
-            return
-        end
-
-        Feature.inspectNativeMenuDescendant(descendant)
-    end)
-    Feature.nativeMenuRootConnections[Root] = connection
-    Maid:add(connection)
+    Feature.nativeMenuRootConnections[Root] = true
 end
 
 function Feature.attachNativeVisualEffectRoot(Root)
@@ -3209,18 +3200,8 @@ function Feature.attachNativeVisualEffectRoot(Root)
         return
     end
 
-    Feature.queueNativeVisualEffectRoot(Root)
-    local connection = Root.DescendantAdded:Connect(function(descendant)
-        if not Config.flags.optimizeNativeMenus then
-            return
-        end
-
-        if Feature.isNativeVisualEffect(descendant) then
-            Feature.queueNativeVisualEffect(descendant)
-        end
-    end)
-    Feature.nativeVisualEffectRootConnections[Root] = connection
-    Maid:add(connection)
+    Feature.queueNativeRootScan(Root)
+    Feature.nativeVisualEffectRootConnections[Root] = true
 end
 
 function Feature.refreshNativeMenuOptimizerRoots()
@@ -3244,6 +3225,85 @@ function Feature.isNativeMenuOpen()
         end
     end
     return false
+end
+
+function Feature.setSaltHubUiSuspendedForNativeMenu(suspended)
+    if not UI.root or not UI.root.Parent then
+        return false
+    end
+
+    if suspended == true then
+        if Feature.nativeMenuUiSuspended then
+            return true
+        end
+        Feature.nativeMenuUiSuspended = true
+        Feature.nativeMenuUiWasVisible = UI.root.Visible == true
+        UI.root.Visible = false
+        UI.setGlassEnabled(false)
+        return true
+    end
+
+    if not Feature.nativeMenuUiSuspended then
+        return false
+    end
+    Feature.nativeMenuUiSuspended = false
+    UI.root.Visible = Feature.nativeMenuUiWasVisible ~= false
+    Feature.nativeMenuUiWasVisible = nil
+    UI.setGlassEnabled(UI.root.Visible == true)
+    return true
+end
+
+function Feature.attachNativeMenuOpenGuard()
+    if Feature.nativeMenuOpenGuardConnection then
+        return
+    end
+
+    local lastRefresh = 0
+    local function attachButton(button)
+        if not button or Feature.nativeMenuOpenGuardConnections[button] then
+            return
+        end
+
+        local connection = button.MouseButton1Down:Connect(function()
+            Feature.setSaltHubUiSuspendedForNativeMenu(true)
+        end)
+        Feature.nativeMenuOpenGuardConnections[button] = connection
+        Maid:add(connection)
+    end
+
+    local function refreshButtons()
+        local frames = Feature.getNativeMenuFrameRoot()
+        if not frames then
+            return
+        end
+
+        for _, group in ipairs({
+            frames:FindFirstChild("UILeft"),
+            frames:FindFirstChild("UIRight"),
+        }) do
+            if group then
+                for _, descendant in ipairs(group:GetDescendants()) do
+                    if descendant:IsA("ImageButton") or descendant:IsA("TextButton") then
+                        attachButton(descendant)
+                    end
+                end
+            end
+        end
+    end
+
+    Feature.nativeMenuOpenGuardConnection = RunService.Heartbeat:Connect(function()
+        local now = os.clock()
+        if now - lastRefresh >= 2 then
+            lastRefresh = now
+            refreshButtons()
+        end
+
+        if Feature.nativeMenuUiSuspended and not Feature.isNativeMenuOpen() then
+            Feature.setSaltHubUiSuspendedForNativeMenu(false)
+        end
+    end)
+    Maid:add(Feature.nativeMenuOpenGuardConnection)
+    refreshButtons()
 end
 
 function Feature.pauseMergeForNativeMenu(now)
@@ -8897,6 +8957,7 @@ local Tabs = {
 function SaltHub.Start()
     Feature.attachAntiAfk()
     Feature.startAntiAfkLoop()
+    Feature.attachNativeMenuOpenGuard()
     if Config.flags.optimizeNativeMenus then
         Feature.attachNativeMenuOptimizer()
     end
