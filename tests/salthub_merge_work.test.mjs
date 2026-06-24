@@ -157,6 +157,22 @@ test("merge placement scans beyond the first free cell for shapes that need neig
   assert.match(executeTargetMergeCascade, /targetCell = Feature\.findMergePlacementCell\(target, targetCell\)/);
 });
 
+test("merge reuses the valid shape anchor when placed model cells include invalid anchors", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const getMergeAnchorCell = source.match(/function Feature\.getMergeAnchorCell\(selected, group\)[\s\S]*?\nend/)?.[0] ?? "";
+  const waitForMergeCell = source.match(/function Feature\.waitForMergeCell\(unit, fallbackCell\)[\s\S]*?\nend/)?.[0] ?? "";
+
+  assert.match(source, /function Feature\.getPlacedModelCellNames\(model\)/);
+  assert.match(source, /function Feature\.sameCellNameSet\(left, right\)/);
+  assert.match(source, /function Feature\.resolveMergeAnchorCell\(unit, candidateCell, requiredCellNames\)/);
+  assert.match(source, /Feature\.sameCellNameSet\(placement\.occupiedCellNames, requiredCellNames\)/);
+  assert.match(getMergeAnchorCell, /local placedCellNames = Feature\.getPlacedModelCellNames\(model\)/);
+  assert.match(getMergeAnchorCell, /Feature\.resolveMergeAnchorCell\(unit, placedCell, placedCellNames\)/);
+  assert.match(waitForMergeCell, /Feature\.resolveMergeAnchorCell\(unit, fallbackCell, placedCellNames\)/);
+  assert.match(waitForMergeCell, /Feature\.resolveMergeAnchorCell\(unit, placedCell, placedCellNames\)/);
+  assert.doesNotMatch(waitForMergeCell, /return cell or fallbackCell/);
+});
+
 test("selected merge target picker only lists real mergeable units", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const isMergeSelectableTarget = source.match(/function Feature\.isMergeSelectableTarget\(unit\)[\s\S]*?\nend/)?.[0] ?? "";

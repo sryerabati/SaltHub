@@ -1088,11 +1088,15 @@ test("auto merge places the best trait unit first so its trait is preserved", ()
 
 test("merge cell lookup prefers placed model Cells attributes over character root position", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const getPlacedModelCellNames = source.match(/function Feature\.getPlacedModelCellNames\(model\)([\s\S]*?)\nend/)?.[1] ?? "";
   const getPlacedModelCell = source.match(/function Feature\.getPlacedModelCell\(model\)([\s\S]*?)\nend/)?.[1] ?? "";
   const waitForMergeCell = source.match(/function Feature\.waitForMergeCell\(unit, fallbackCell\)([\s\S]*?)\nend/)?.[1] ?? "";
 
+  assert.match(source, /function Feature\.getPlacedModelCellNames/);
   assert.match(source, /function Feature\.getPlacedModelCell/);
-  assert.match(getPlacedModelCell, /model:GetAttribute\("Cells"\) or model:GetAttribute\("GridCells"\)/);
+  assert.match(getPlacedModelCellNames, /model:GetAttribute\("Cells"\) or model:GetAttribute\("GridCells"\)/);
+  assert.match(getPlacedModelCell, /Feature\.getPlacedModelCellNames\(model\)/);
+  assert.match(waitForMergeCell, /Feature\.resolveMergeAnchorCell\(unit, fallbackCell, placedCellNames\)/);
   assert.match(waitForMergeCell, /Feature\.getPlacedModelCell\(model\)/);
 });
 

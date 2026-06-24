@@ -7452,33 +7452,114 @@ function Feature.getMergeAnchorCell(selected, group)
 
     for _, unit in ipairs(anchors) do
         local model = Feature.findPlacedUnitModel(unit)
+        local placedCellNames = Feature.getPlacedModelCellNames(model)
         local placedCell = Feature.getPlacedModelCell(model)
-        if placedCell then
-            return placedCell
+        local resolvedCell = Feature.resolveMergeAnchorCell(unit, placedCell, placedCellNames)
+        if resolvedCell then
+            return resolvedCell
         end
         local root = Feature.getUnitRoot(model)
         local cell = root and Feature.findNearestGridCellToPosition(root.Position)
-        if cell then
-            return cell
+        resolvedCell = Feature.resolveMergeAnchorCell(unit, cell, placedCellNames)
+        if resolvedCell then
+            return resolvedCell
+        end
+    end
+    return nil
+end
+
+function Feature.getPlacedModelCellNames(model)
+    if not model then
+        return {}
+    end
+    local cellsText = model:GetAttribute("Cells") or model:GetAttribute("GridCells")
+    if type(cellsText) ~= "string" or cellsText == "" then
+        return {}
+    end
+
+    local names = {}
+    local seen = {}
+    for cellName in cellsText:gmatch("[^,]+") do
+        local clean = tostring(cellName):gsub("^%s+", ""):gsub("%s+$", "")
+        if clean ~= "" and not seen[clean] then
+            seen[clean] = true
+            table.insert(names, clean)
+        end
+    end
+    return names
+end
+
+function Feature.sameCellNameSet(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" or #left ~= #right then
+        return false
+    end
+
+    local counts = {}
+    for _, cellName in ipairs(left) do
+        local clean = tostring(cellName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        counts[clean] = (counts[clean] or 0) + 1
+    end
+    for _, cellName in ipairs(right) do
+        local clean = tostring(cellName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if not counts[clean] then
+            return false
+        end
+        counts[clean] -= 1
+        if counts[clean] <= 0 then
+            counts[clean] = nil
+        end
+    end
+    return next(counts) == nil
+end
+
+function Feature.resolveMergeAnchorCell(unit, candidateCell, requiredCellNames)
+    if not unit then
+        return nil
+    end
+
+    local hasRequiredCells = type(requiredCellNames) == "table" and #requiredCellNames > 0
+    local function valid(cell)
+        if not cell then
+            return nil
+        end
+        local placement = Feature.getMergePlacement(unit, cell)
+        if not placement then
+            return nil
+        end
+        if hasRequiredCells and not Feature.sameCellNameSet(placement.occupiedCellNames, requiredCellNames) then
+            return nil
+        end
+        return cell
+    end
+
+    local resolved = valid(candidateCell)
+    if resolved then
+        return resolved
+    end
+
+    if hasRequiredCells then
+        local grid = Feature.getCurrentGridModel()
+        local _, gridMap = Feature.buildGridCells(grid)
+        for _, cellName in ipairs(requiredCellNames) do
+            resolved = valid(gridMap[tostring(cellName)])
+            if resolved then
+                return resolved
+            end
         end
     end
     return nil
 end
 
 function Feature.getPlacedModelCell(model)
-    if not model then
-        return nil
-    end
-    local cellsText = model:GetAttribute("Cells") or model:GetAttribute("GridCells")
-    if type(cellsText) ~= "string" or cellsText == "" then
+    local cellNames = Feature.getPlacedModelCellNames(model)
+    if #cellNames == 0 then
         return nil
     end
 
     local grid = Feature.getCurrentGridModel()
     local _, gridMap = Feature.buildGridCells(grid)
-    for cellName in cellsText:gmatch("[^,]+") do
-        local clean = tostring(cellName):gsub("^%s+", ""):gsub("%s+$", "")
-        local cell = gridMap[clean]
+    for _, cellName in ipairs(cellNames) do
+        local cell = gridMap[cellName]
         if cell then
             return cell
         end
@@ -7488,13 +7569,20 @@ end
 
 function Feature.waitForMergeCell(unit, fallbackCell)
     local model = Feature.waitForPlacedUnitModel(unit, 2.5)
+    local placedCellNames = Feature.getPlacedModelCellNames(model)
+    local resolved = Feature.resolveMergeAnchorCell(unit, fallbackCell, placedCellNames)
+    if resolved then
+        return resolved
+    end
     local placedCell = Feature.getPlacedModelCell(model)
-    if placedCell then
-        return placedCell
+    resolved = Feature.resolveMergeAnchorCell(unit, placedCell, placedCellNames)
+    if resolved then
+        return resolved
     end
     local root = Feature.getUnitRoot(model)
     local cell = root and Feature.findNearestGridCellToPosition(root.Position)
-    return cell or fallbackCell
+    resolved = Feature.resolveMergeAnchorCell(unit, cell, placedCellNames)
+    return resolved or fallbackCell
 end
 
 function Feature.getMergeCandidates(selected)
