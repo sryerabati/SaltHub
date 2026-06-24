@@ -616,6 +616,7 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.match(source, /function Feature\.findPendingBuyCandidate/);
   assert.match(source, /function Feature\.setPendingBuy/);
   assert.match(source, /function Feature\.clearPendingBuy/);
+  assert.match(source, /function Feature\.clearStalePendingBuy/);
   assert.match(source, /function Feature\.extendPendingBuyHold/);
   assert.match(source, /function Feature\.findRolledCharacterByKey/);
   assert.match(source, /function Feature\.waitForRolledCharacterGone/);
@@ -629,7 +630,8 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.match(source, /expiresAt = now \+ \(tonumber\(Config\.delays\.buyAttemptWindow\) or 8\.0\)/);
   assert.match(source, /State\.rollBusyUntil = math\.max\(State\.rollBusyUntil or 0, os\.clock\(\) \+ \(tonumber\(Config\.delays\.buyReservePause\) or 4\.0\)\)/);
   assert.match(source, /Feature\.extendPendingBuyHold\(\)/);
-  assert.match(source, /if pending\.expiresAt and os\.clock\(\) < pending\.expiresAt then[\s\S]*?Feature\.extendPendingBuyHold\(\)[\s\S]*?return nil/);
+  assert.match(source, /Feature\.clearStalePendingBuy\(\)/);
+  assert.doesNotMatch(source, /if pending\.expiresAt and os\.clock\(\) < pending\.expiresAt then[\s\S]*?return nil/);
 
   const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
@@ -653,25 +655,39 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   const pendingBody = source.match(/function Feature\.findPendingBuyCandidate\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const setPendingBody = source.match(/function Feature\.setPendingBuy\(entry\)([\s\S]*?)\nend/)?.[1] ?? "";
   const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const rollOnceBody = source.match(/function Feature\.rollOnce\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const shouldRollBody = source.match(/function Feature\.shouldRollAgain\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const autoRollSafetyBody = source.match(/local function applyAutoRollTimingSafetyDefaults\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const importBody = source.match(/function Feature\.importConfig\(text\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(source, /buyReservePause = 4\.0/);
-  assert.match(source, /fastRollBuyHold = 2\.75/);
+  assert.match(source, /fastRollRollSettle = 2\.75/);
+  assert.match(source, /function Feature\.getRollSettleDelay/);
   assert.match(source, /function Feature\.reserveBuyBeforeRolling/);
   assert.match(source, /function Feature\.hasFastRollOwned/);
   assert.match(source, /function Feature\.teleportToPrompt/);
   assert.match(rollBody, /local reserved = Feature\.reserveBuyBeforeRolling\(\)/);
   assert.match(rollBody, /if reserved then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
   assert.match(rollBody, /Feature\.rollOnce\(\)/);
-  assert.match(setPendingBody, /buyAt = now \+ Feature\.getFastRollBuyHold\(\)/);
-  assert.match(pendingBody, /if pending\.buyAt and os\.clock\(\) < pending\.buyAt then[\s\S]*?Feature\.extendPendingBuyHold\(\)[\s\S]*?return nil/);
-  assert.match(delayBody, /local buyAtRemaining = \(State\.pendingBuy\.buyAt or 0\) - os\.clock\(\)/);
-  assert.match(delayBody, /return math\.max\(tonumber\(Config\.delays\.buyRetryPoll\) or 0\.35, buyAtRemaining\)/);
+  assert.doesNotMatch(setPendingBody, /\bbuyAt\s*=/);
+  assert.doesNotMatch(pendingBody, /pending\.buyAt/);
+  assert.match(pendingBody, /Feature\.clearStalePendingBuy\(\)/);
+  assert.doesNotMatch(delayBody, /buyAtRemaining/);
+  assert.match(rollOnceBody, /Feature\.getRollSettleDelay\(\)/);
+  assert.match(shouldRollBody, /Feature\.getRollSettleDelay\(\)/);
+  assert.match(autoRollSafetyBody, /Config\.delays\.rollSettle = math\.max\(tonumber\(Config\.delays\.rollSettle\) or 0, 1\.25\)/);
+  assert.match(autoRollSafetyBody, /Config\.delays\.buyReservePause = math\.max\(tonumber\(Config\.delays\.buyReservePause\) or 0, 4\.0\)/);
+  assert.match(autoRollSafetyBody, /Config\.delays\.fastRollRollSettle = math\.max\(tonumber\(Config\.delays\.fastRollRollSettle or Config\.delays\.fastRollBuyHold\) or 0, 2\.75\)/);
+  assert.match(source, /applyAutoRollTimingSafetyDefaults\(\)/);
+  assert.match(importBody, /applyAutoRollTimingSafetyDefaults\(\)/);
   assert.match(buyBody, /local current = Feature\.findRolledCharacterByKey\(key\) or entry/);
   assert.match(buyBody, /Feature\.teleportToPrompt\(current\.prompt, 3\.15\)/);
   assert.match(buyBody, /if prompted and Feature\.waitForRolledCharacterGone\(key, tonumber\(Config\.delays\.buyConfirmTimeout\) or 2\.5\) then/);
   assert.doesNotMatch(buyBody, /Feature\.returnToRollStation\(\)/);
   assert.doesNotMatch(buyBody, /Feature\.moveNearInstance\(entry\.prompt, 3\.15\)/);
   assert.doesNotMatch(buyBody, /bought = Feature\.holdPrompt\(entry\.prompt\)/);
+  const toggleBody = source.match(/function Feature\.toggleAutoRoll\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.doesNotMatch(toggleBody, /Feature\.returnToRollStation\(\)/);
 });
 
 test("one-time buttons are removed from primary pages", () => {

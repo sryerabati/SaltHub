@@ -59,7 +59,7 @@ local Config = {
         buyScan = 0.12,
         rollSettle = 1.25,
         buyReservePause = 4.0,
-        fastRollBuyHold = 2.75,
+        fastRollRollSettle = 2.75,
         buyRetryPoll = 0.35,
         buyConfirmTimeout = 2.5,
         buyAttemptWindow = 8.0,
@@ -277,6 +277,14 @@ local function applyNativeMenuOptimizerSafetyDefaults()
     end
 end
 
+local function applyAutoRollTimingSafetyDefaults()
+    Config.delays.rollSettle = math.max(tonumber(Config.delays.rollSettle) or 0, 1.25)
+    Config.delays.buyReservePause = math.max(tonumber(Config.delays.buyReservePause) or 0, 4.0)
+    Config.delays.buyAttemptWindow = math.max(tonumber(Config.delays.buyAttemptWindow) or 0, 8.0)
+    Config.delays.buyRetryPoll = math.max(tonumber(Config.delays.buyRetryPoll) or 0, 0.35)
+    Config.delays.fastRollRollSettle = math.max(tonumber(Config.delays.fastRollRollSettle or Config.delays.fastRollBuyHold) or 0, 2.75)
+end
+
 local workspaceConfigLoaded = false
 local workspaceConfigStatus = nil
 
@@ -423,6 +431,7 @@ if presetApplied and savedConfigApplied then
 end
 applyBestLineupOptimizerDefaults()
 applyNativeMenuOptimizerSafetyDefaults()
+applyAutoRollTimingSafetyDefaults()
 
 local Maid = { items = {} }
 function Maid:add(item)
@@ -4352,7 +4361,7 @@ function Feature.rollOnce()
     local ok = Feature.holdPrompt(prompt)
     if ok then
         State.lastRollAt = os.clock()
-        State.rollBusyUntil = State.lastRollAt + (tonumber(Config.delays.rollSettle) or 1.25)
+        State.rollBusyUntil = State.lastRollAt + Feature.getRollSettleDelay()
         Log.push("Held E on Roll.")
     end
     return ok
@@ -4526,11 +4535,12 @@ function Feature.hasFastRollOwned()
     return owned
 end
 
-function Feature.getFastRollBuyHold()
+function Feature.getRollSettleDelay()
+    local settle = tonumber(Config.delays.rollSettle) or 1.25
     if Feature.hasFastRollOwned() then
-        return tonumber(Config.delays.fastRollBuyHold) or 2.75
+        settle = math.max(settle, tonumber(Config.delays.fastRollRollSettle) or 2.75)
     end
-    return 0
+    return settle
 end
 
 function Feature.extendPendingBuyHold()
@@ -4546,23 +4556,13 @@ function Feature.findPendingBuyCandidate()
         return nil
     end
 
-    if pending.buyAt and os.clock() < pending.buyAt then
-        Feature.extendPendingBuyHold()
-        return nil
-    end
-
     local entry = Feature.findRolledCharacterByKey(pending.key)
     if entry then
         Feature.extendPendingBuyHold()
         return entry
     end
 
-    if pending.expiresAt and os.clock() < pending.expiresAt then
-        Feature.extendPendingBuyHold()
-        return nil
-    end
-
-    Feature.clearPendingBuy()
+    Feature.clearStalePendingBuy()
     return nil
 end
 
@@ -4579,7 +4579,6 @@ function Feature.setPendingBuy(entry)
         mutation = entry.mutation,
         price = price,
         createdAt = now,
-        buyAt = now + Feature.getFastRollBuyHold(),
         expiresAt = now + (tonumber(Config.delays.buyAttemptWindow) or 8.0),
     }
     Feature.extendPendingBuyHold()
@@ -4592,6 +4591,12 @@ end
 
 function Feature.clearPendingBuy()
     State.pendingBuy = nil
+end
+
+function Feature.clearStalePendingBuy()
+    State.pendingBuy = nil
+    local settle = Feature.getRollSettleDelay()
+    State.rollBusyUntil = math.min(State.rollBusyUntil or 0, os.clock() + settle)
 end
 
 function Feature.shouldWaitForCashToBuy(entry)
@@ -5010,12 +5015,6 @@ end
 function Feature.getAutoRollLoopDelay()
     local baseDelay = tonumber(Config.delays.roll) or 0.12
     if State.buyingCharacter or State.pendingBuy then
-        if State.pendingBuy then
-            local buyAtRemaining = (State.pendingBuy.buyAt or 0) - os.clock()
-            if buyAtRemaining > 0 then
-                return math.max(tonumber(Config.delays.buyRetryPoll) or 0.35, buyAtRemaining)
-            end
-        end
         return tonumber(Config.delays.buyRetryPoll) or 0.35
     end
     local holdRemaining = (tonumber(State.pityHoldUntil) or 0) - os.clock()
@@ -5094,7 +5093,6 @@ function Feature.toggleAutoRoll(value)
     Config.flags.autoRoll = value
     Feature.applyAutoRollSettingsLocal()
     if value then
-        Feature.returnToRollStation()
         Feature.startLoop("autoRoll", function()
             return Feature.getAutoRollLoopDelay()
         end, Feature.autoRollStep)
@@ -5110,7 +5108,7 @@ function Feature.shouldRollAgain()
     if os.clock() < (State.rollBusyUntil or 0) then
         return false
     end
-    return os.clock() - (State.lastRollAt or 0) >= (tonumber(Config.delays.rollSettle) or 1.25)
+    return os.clock() - (State.lastRollAt or 0) >= Feature.getRollSettleDelay()
 end
 
 function Feature.autoBuyStep()
@@ -9288,6 +9286,7 @@ function Feature.importConfig(text)
     if ok and type(decoded) == "table" then
         mergeConfig(Config, decoded.Config or decoded)
         applyBestLineupOptimizerDefaults()
+        applyAutoRollTimingSafetyDefaults()
         if UI.scale then
             UI.scale.Scale = Config.ui.scale
         end
