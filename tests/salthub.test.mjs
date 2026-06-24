@@ -556,12 +556,13 @@ test("prompt activation is exact so rolling cannot accidentally buy podium units
   assert.match(holdBody, /return Feature\.holdKey/);
 
   const rollBody = source.match(/function Feature\.rollOnce\(\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(rollBody, /Feature\.returnToRollStation\(\)/);
+  assert.match(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
   assert.match(rollBody, /local ok = Feature\.holdPrompt\(prompt\)/);
+  assert.doesNotMatch(rollBody, /Feature\.returnToRollStation\(\)/);
   assert.doesNotMatch(rollBody, /Feature\.holdKey/);
 });
 
-test("auto roll parks behind the roll button for natural walking", () => {
+test("auto roll uses prompt teleporting instead of walking", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /rollStationBehindDistance = 5\.6/);
@@ -573,6 +574,9 @@ test("auto roll parks behind the roll button for natural walking", () => {
 
   const stationBody = source.match(/function Feature\.getRollStationCFrame\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(stationBody, /buttonPart\.Position - direction \* 4\.2/);
+  const rollBody = source.match(/function Feature\.rollOnce\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
+  assert.doesNotMatch(rollBody, /Feature\.returnToRollStation\(\)/);
 });
 
 test("auto roll settles between rolls and auto buy can run independently", () => {
@@ -651,7 +655,7 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(source, /buyReservePause = 4\.0/);
-  assert.match(source, /fastRollBuyHold = 1\.75/);
+  assert.match(source, /fastRollBuyHold = 2\.75/);
   assert.match(source, /function Feature\.reserveBuyBeforeRolling/);
   assert.match(source, /function Feature\.hasFastRollOwned/);
   assert.match(source, /function Feature\.teleportToPrompt/);
@@ -665,6 +669,7 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   assert.match(buyBody, /local current = Feature\.findRolledCharacterByKey\(key\) or entry/);
   assert.match(buyBody, /Feature\.teleportToPrompt\(current\.prompt, 3\.15\)/);
   assert.match(buyBody, /if prompted and Feature\.waitForRolledCharacterGone\(key, tonumber\(Config\.delays\.buyConfirmTimeout\) or 2\.5\) then/);
+  assert.doesNotMatch(buyBody, /Feature\.returnToRollStation\(\)/);
   assert.doesNotMatch(buyBody, /Feature\.moveNearInstance\(entry\.prompt, 3\.15\)/);
   assert.doesNotMatch(buyBody, /bought = Feature\.holdPrompt\(entry\.prompt\)/);
 });

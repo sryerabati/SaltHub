@@ -59,7 +59,7 @@ local Config = {
         buyScan = 0.12,
         rollSettle = 0.55,
         buyReservePause = 4.0,
-        fastRollBuyHold = 1.75,
+        fastRollBuyHold = 2.75,
         buyRetryPoll = 0.35,
         buyConfirmTimeout = 2.5,
         buyAttemptWindow = 8.0,
@@ -4347,7 +4347,7 @@ function Feature.rollOnce()
         return false
     end
 
-    Feature.returnToRollStation()
+    Feature.teleportToPrompt(prompt, 3.15)
     task.wait(0.05)
     local ok = Feature.holdPrompt(prompt)
     if ok then
@@ -4528,7 +4528,7 @@ end
 
 function Feature.getFastRollBuyHold()
     if Feature.hasFastRollOwned() then
-        return tonumber(Config.delays.fastRollBuyHold) or 1.75
+        return tonumber(Config.delays.fastRollBuyHold) or 2.75
     end
     return 0
 end
@@ -4687,8 +4687,6 @@ function Feature.buyRolledCharacter(entry)
             end
             task.wait(tonumber(Config.delays.buyPromptRetryDelay) or 0.18)
         end
-        task.wait(0.12)
-        Feature.returnToRollStation()
     end)
     if not ok then
         Log.push("Buy failed: " .. tostring(err))
