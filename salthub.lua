@@ -3675,6 +3675,12 @@ function Feature.pushTraitStatus(message)
     Log.push(message)
 end
 
+function Feature.stopAutoTraitNoShards()
+    Config.flags.autoTrait = false
+    Feature.stopLoop("autoTrait")
+    Log.push("Auto Trait Reroll stopped: no Trait Shards.")
+end
+
 function Feature.autoTraitStep()
     if not listHasItems(Config.trait.targetTraits) then
         Feature.pushTraitStatus("Select at least one stop trait first.")
@@ -3700,13 +3706,16 @@ function Feature.autoTraitStep()
     end
 
     if Feature.getTraitShardAmount() <= 0 then
-        Feature.pushTraitStatus("Trait reroll paused: no Trait Shards.")
+        Feature.stopAutoTraitNoShards()
         return
     end
 
     Feature.requestTraitRoll(unit)
     task.wait(0.15)
     State.scanUnits()
+    if Feature.getTraitShardAmount() <= 0 then
+        Feature.stopAutoTraitNoShards()
+    end
 end
 
 function Feature.getPlayerCash()

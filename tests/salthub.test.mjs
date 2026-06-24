@@ -723,6 +723,21 @@ test("trait reroll uses game trait data and the native roll contract", () => {
   assert.doesNotMatch(source, /Remote\.fire\("TraitRequest", \{\s*unit = unit\.instance,\s*id = unit\.id,\s*targets = Config\.trait\.targetTraits,\s*\}\)/);
 });
 
+test("auto trait reroll turns itself off when trait shards run out", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const stopNoShards = source.match(/function Feature\.stopAutoTraitNoShards\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const autoTraitStep = source.match(/function Feature\.autoTraitStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.stopAutoTraitNoShards/);
+  assert.match(stopNoShards, /Config\.flags\.autoTrait = false/);
+  assert.match(stopNoShards, /Feature\.stopLoop\("autoTrait"\)/);
+  assert.match(stopNoShards, /Log\.push\("Auto Trait Reroll stopped: no Trait Shards\."\)/);
+  assert.match(autoTraitStep, /if Feature\.getTraitShardAmount\(\) <= 0 then/);
+  assert.match(autoTraitStep, /Feature\.stopAutoTraitNoShards\(\)/);
+  assert.match(autoTraitStep, /State\.scanUnits\(\)[\s\S]*if Feature\.getTraitShardAmount\(\) <= 0 then[\s\S]*Feature\.stopAutoTraitNoShards\(\)/);
+  assert.match(autoTraitStep, /return/);
+});
+
 test("data and log status boxes are removed from the UI", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
