@@ -1353,11 +1353,20 @@ test("auto merge turns itself off after the full anime sweep", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const finishBody = source.match(/function Feature\.finishAutoMergeSweep\(\)([\s\S]*?)\nfunction Feature\.autoMergeStep/)?.[1] ?? "";
   const autoMergeStep = source.match(/function Feature\.autoMergeStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const uiToggleBody = source.match(/function UI\.toggle\(parent, text, getter, setter\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const refreshToggleBody = source.match(/function UI\.refreshToggle\(text\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const toggleAutoMerge = source.match(/function Feature\.toggleAutoMerge\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(source, /function Feature\.finishAutoMergeSweep/);
   assert.match(finishBody, /Log\.push\("Auto merge finished every anime\."\)/);
   assert.match(finishBody, /Feature\.toggleAutoMerge\(false\)/);
   assert.match(autoMergeStep, /if not family then[\s\S]*?Feature\.finishAutoMergeSweep\(\)[\s\S]*?return false/);
+  assert.match(source, /toggleRedraws = \{\}/);
+  assert.match(source, /function UI\.refreshToggle\(text\)/);
+  assert.match(uiToggleBody, /UI\.toggleRedraws\[text\] = redraw/);
+  assert.match(refreshToggleBody, /local redraw = UI\.toggleRedraws\[text\]/);
+  assert.match(refreshToggleBody, /if redraw then[\s\S]*?redraw\(\)/);
+  assert.match(toggleAutoMerge, /UI\.refreshToggle\("Auto Merge Duplicates"\)/);
 });
 
 test("auto merge keeps idle guard but finishes instead of rescanning after sweep", () => {

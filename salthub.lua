@@ -1548,6 +1548,7 @@ end
 local UI = {
     tabs = {},
     controls = {},
+    toggleRedraws = {},
     activeTab = nil,
 }
 
@@ -1885,6 +1886,7 @@ function UI.toggle(parent, text, getter, setter)
     local function redraw()
         mark.BackgroundColor3 = getter() and Theme.accent2 or Theme.line
     end
+    UI.toggleRedraws[text] = redraw
     button.MouseButton1Click:Connect(function()
         setter(not getter())
         if Feature and Feature.scheduleConfigSave then
@@ -1894,6 +1896,13 @@ function UI.toggle(parent, text, getter, setter)
     end)
     redraw()
     return button
+end
+
+function UI.refreshToggle(text)
+    local redraw = UI.toggleRedraws[text]
+    if redraw then
+        redraw()
+    end
 end
 
 function UI.textBox(parent, title, initial, callback)
@@ -8426,6 +8435,7 @@ function Feature.toggleAutoMerge(value)
         State.autoMergeIgnoredCharacters = {}
         State.autoMergeIdleUntil = 0
     end
+    UI.refreshToggle("Auto Merge Duplicates")
 end
 
 function Feature.toggleTrait(value)
