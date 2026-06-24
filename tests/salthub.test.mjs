@@ -901,21 +901,22 @@ test("best lineup optimizer penalizes sparse plans and favors compact placement 
   assert.match(source, /local planSpaceScore = Feature\.getLineupPlanSpaceScore\(plan, gridMap, baseOccupancy\)/);
 });
 
-test("best lineup optimizer makes unit tier dominate filler and compactness math", () => {
+test("best lineup optimizer keeps unit tier as support for combat scoring", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /rarityTierWeight = 5000/);
   assert.match(source, /mutationTierWeight = 800/);
   assert.match(source, /traitTierWeight = 600/);
+  assert.match(source, /tierSupportWeight = 0\.05/);
   assert.match(source, /function Feature\.getLineupRarityValue/);
   assert.match(source, /function Feature\.getLineupMutationTierValue/);
   assert.match(source, /function Feature\.getLineupTraitTierValue/);
   assert.match(source, /function Feature\.getLineupUnitTierScore/);
   assert.match(source, /local tierScore = Feature\.getLineupUnitTierScore\(unit, derived\)/);
-  assert.match(source, /return statScore \+ tierScore, derived, tierScore, statScore/);
+  assert.match(source, /return statScore \+ tierScore \* \(tonumber\(Config\.bestLineup\.tierSupportWeight\) or 0\.05\), derived, tierScore, statScore/);
   assert.match(source, /tierScore = tierScore/);
   assert.match(source, /statScore = statScore \* penalty/);
-  assert.match(source, /score = tierScore \+ statScore \* penalty/);
+  assert.match(source, /score = statScore \* penalty \+ tierScore \* \(tonumber\(Config\.bestLineup\.tierSupportWeight\) or 0\.05\)/);
   assert.match(source, /function Feature\.sortLineupCandidatesByTier/);
   assert.match(source, /addFrom\(byTier, math\.max\(1, tonumber\(Config\.bestLineup\.tierCandidateLimit\) or limit\)\)/);
   assert.match(source, /if a\.tierScore ~= b\.tierScore then/);
@@ -939,6 +940,22 @@ test("best lineup places best combat units before range and filler heuristics", 
   assert.match(source, /return Feature\.orderBestLineupPlanForPlacement\(Feature\.buildBestLineupMultiVariantPlan\(candidates, cells, gridMap, \{\}, fillCandidates, metrics\)\)/);
   assert.match(source, /Feature\.rebuildBestLineupPlanByRange\(improved, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
   assert.match(source, /Feature\.fillBestLineupBackfillPlan\(ranged, fillCandidates or candidates, cells, gridMap, maxPlacements, baseOccupancy, metrics\)/);
+});
+
+test("best lineup actual combat output dominates shiny low-damage filler", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const scoreBody = source.match(/function Feature\.scoreLineupUnit\(unit\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const buildCandidates = source.match(/function Feature\.buildBestLineupCandidates\(includeEquipped\)([\s\S]*?)\nfunction Feature\.getBestLineupFillCandidates/)?.[1] ?? "";
+  const scoreSort = source.match(/function Feature\.sortLineupCandidatesByScore\(candidates\)([\s\S]*?)\nfunction Feature\.sortLineupCandidatesByFrontNeed/)?.[1] ?? "";
+  const backfillSort = source.match(/function Feature\.sortLineupBackfillCandidates\(candidates\)([\s\S]*?)\nfunction Feature\.fillBestLineupBackfillPlan/)?.[1] ?? "";
+
+  assert.match(scoreBody, /tierSupportWeight/);
+  assert.doesNotMatch(scoreBody, /return statScore \+ tierScore, derived/);
+  assert.match(buildCandidates, /score = statScore \* penalty \+ tierScore \* \(tonumber\(Config\.bestLineup\.tierSupportWeight\) or 0\.05\)/);
+  assert.match(scoreSort, /if a\.score ~= b\.score then\s+return a\.score > b\.score/);
+  assert.doesNotMatch(scoreSort, /if a\.tierScore ~= b\.tierScore then\s+return a\.tierScore > b\.tierScore[\s\S]*?if a\.score ~= b\.score/);
+  assert.match(backfillSort, /if scoreA ~= scoreB then\s+return scoreA > scoreB/);
+  assert.doesNotMatch(backfillSort, /if a\.tierScore ~= b\.tierScore then\s+return a\.tierScore > b\.tierScore[\s\S]*?local scoreA/);
 });
 
 test("best lineup resolves character mutation and trait data through normalized aliases", () => {

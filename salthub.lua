@@ -134,6 +134,7 @@ local Config = {
         rarityTierWeight = 5000,
         mutationTierWeight = 800,
         traitTierWeight = 600,
+        tierSupportWeight = 0.05,
         frontValueWeight = 1.25,
         rangeOrderWeight = 120,
         rangeOrderTolerance = 1,
@@ -236,6 +237,7 @@ local function applyBestLineupOptimizerDefaults()
     best.rarityTierWeight = math.max(tonumber(best.rarityTierWeight) or 0, 5000)
     best.mutationTierWeight = math.max(tonumber(best.mutationTierWeight) or 0, 800)
     best.traitTierWeight = math.max(tonumber(best.traitTierWeight) or 0, 600)
+    best.tierSupportWeight = math.min(math.max(tonumber(best.tierSupportWeight) or 0.05, 0), 0.2)
     best.frontValueWeight = math.max(tonumber(best.frontValueWeight) or 0, 1.25)
     best.rangeOrderWeight = math.max(tonumber(best.rangeOrderWeight) or 0, 120)
     best.rangeOrderTolerance = math.max(tonumber(best.rangeOrderTolerance) or 0, 1)
@@ -5422,7 +5424,7 @@ function Feature.scoreLineupUnit(unit)
         + areaBonus
     local tierScore = Feature.getLineupUnitTierScore(unit, derived)
 
-    return statScore + tierScore, derived, tierScore, statScore
+    return statScore + tierScore * (tonumber(Config.bestLineup.tierSupportWeight) or 0.05), derived, tierScore, statScore
 end
 
 function Feature.getLineupFrontReferencePosition(cells)
@@ -5965,8 +5967,8 @@ function Feature.buildBestLineupCandidates(includeEquipped)
                     footprint = footprint,
                     tierScore = tierScore,
                     statScore = statScore * penalty,
-                    score = tierScore + statScore * penalty,
-                    scorePerSpot = (tierScore + statScore * penalty) / math.max(spots ^ 0.5, 1),
+                    score = statScore * penalty + tierScore * (tonumber(Config.bestLineup.tierSupportWeight) or 0.05),
+                    scorePerSpot = (statScore * penalty + tierScore * (tonumber(Config.bestLineup.tierSupportWeight) or 0.05)) / math.max(spots ^ 0.5, 1),
                 })
             end
         end
@@ -6263,17 +6265,22 @@ end
 function Feature.sortLineupCandidatesByScore(candidates)
     local ordered = copyArray(candidates or {})
     table.sort(ordered, function(a, b)
-        if a.tierScore ~= b.tierScore then
-            return a.tierScore > b.tierScore
-        end
         if a.score ~= b.score then
             return a.score > b.score
         end
-        if a.scorePerSpot ~= b.scorePerSpot then
-            return a.scorePerSpot > b.scorePerSpot
-        end
         if a.derived.dps ~= b.derived.dps then
             return a.derived.dps > b.derived.dps
+        end
+        local damageA = tonumber(a and a.derived and a.derived.damage) or 0
+        local damageB = tonumber(b and b.derived and b.derived.damage) or 0
+        if damageA ~= damageB then
+            return damageA > damageB
+        end
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
+        end
+        if a.scorePerSpot ~= b.scorePerSpot then
+            return a.scorePerSpot > b.scorePerSpot
         end
         return tostring(a.unit.id) < tostring(b.unit.id)
     end)
@@ -6420,23 +6427,23 @@ end
 function Feature.sortLineupBackfillCandidates(candidates)
     local ordered = copyArray(candidates or {})
     table.sort(ordered, function(a, b)
-        if a.tierScore ~= b.tierScore then
-            return a.tierScore > b.tierScore
-        end
-        local rangeA = tonumber(a and a.derived and a.derived.range) or 0
-        local rangeB = tonumber(b and b.derived and b.derived.range) or 0
-        if rangeA ~= rangeB then
-            return rangeA > rangeB
+        local scoreA = tonumber(a and a.score) or 0
+        local scoreB = tonumber(b and b.score) or 0
+        if scoreA ~= scoreB then
+            return scoreA > scoreB
         end
         local dpsA = tonumber(a and a.derived and a.derived.dps) or 0
         local dpsB = tonumber(b and b.derived and b.derived.dps) or 0
         if dpsA ~= dpsB then
             return dpsA > dpsB
         end
-        local scoreA = tonumber(a and a.score) or 0
-        local scoreB = tonumber(b and b.score) or 0
-        if scoreA ~= scoreB then
-            return scoreA > scoreB
+        local rangeA = tonumber(a and a.derived and a.derived.range) or 0
+        local rangeB = tonumber(b and b.derived and b.derived.range) or 0
+        if rangeA ~= rangeB then
+            return rangeA > rangeB
+        end
+        if a.tierScore ~= b.tierScore then
+            return a.tierScore > b.tierScore
         end
         return tostring(a and a.unit and a.unit.id or "") < tostring(b and b.unit and b.unit.id or "")
     end)
