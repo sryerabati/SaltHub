@@ -1534,6 +1534,25 @@ test("buhara collection and feeding use direct teleport positioning", () => {
   assert.match(feedBody, /Feature\.tryBuharaPrompt\(prompt\)/);
 });
 
+test("auto buhara backs off missing target checks while holding food", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const feedBody = source.match(/function Feature\.feedBuhara\(forceAttempt\)([\s\S]*?)\nfunction Feature\.autoBuharaStep/)?.[1] ?? "";
+  const toggleBody = source.match(/function Feature\.toggleBuhara\(value\)([\s\S]*?)\nfunction Feature\.getBattlepassRewardModule/)?.[1] ?? "";
+
+  assert.match(source, /holdPoll = 4\.0/);
+  assert.match(source, /holdLogInterval = 8\.0/);
+  assert.match(source, /buharaHoldUntil = 0/);
+  assert.match(source, /lastBuharaHoldLogAt = 0/);
+  assert.match(source, /function Feature\.setBuharaHoldBackoff/);
+  assert.match(source, /State\.buharaHoldUntil = now \+ math\.max\(tonumber\(Config\.buhara\.holdPoll\) or 4, 1\)/);
+  assert.match(source, /function Feature\.getAutoBuharaLoopDelay/);
+  assert.match(source, /local holdUntil = tonumber\(State\.buharaHoldUntil\) or 0/);
+  assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara target is not visible yet; holding food\."\)/);
+  assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara feed prompt was not found yet; holding food\."\)/);
+  assert.match(toggleBody, /Feature\.startLoop\("autoBuhara", Feature\.getAutoBuharaLoopDelay, Feature\.autoBuharaStep\)/);
+  assert.doesNotMatch(toggleBody, /return Config\.delays\.event/);
+});
+
 test("auto start wave is gated by owned plot wave state", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 

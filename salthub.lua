@@ -189,6 +189,8 @@ local Config = {
         feedRetries = 3,
         scanInterval = 0.65,
         dropInterval = 1.5,
+        holdPoll = 4.0,
+        holdLogInterval = 8.0,
         maxScanItems = 450,
     },
 }
@@ -809,6 +811,8 @@ local State = {
     buharaTarget = nil,
     buharaTargetScanAt = 0,
     buharaDropAt = 0,
+    buharaHoldUntil = 0,
+    lastBuharaHoldLogAt = 0,
     lastBestLineupSummary = "",
     bestLineupRunId = 0,
     bestLineupWaveBlockLogAt = 0,
@@ -8661,6 +8665,29 @@ function Feature.moveToBuharaFeedPrompt(target, prompt)
     return Feature.teleportToBuharaObject(target, Config.buhara.feedDistance)
 end
 
+function Feature.setBuharaHoldBackoff(message)
+    local now = os.clock()
+    State.buharaHoldUntil = now + math.max(tonumber(Config.buhara.holdPoll) or 4, 1)
+    local logInterval = math.max(tonumber(Config.buhara.holdLogInterval) or 8, 1)
+    if State.lastBuharaHoldLogAt == 0 or now - (State.lastBuharaHoldLogAt or 0) >= logInterval then
+        State.lastBuharaHoldLogAt = now
+        Log.push(message)
+    end
+end
+
+function Feature.clearBuharaHoldBackoff()
+    State.buharaHoldUntil = 0
+end
+
+function Feature.getAutoBuharaLoopDelay()
+    local now = os.clock()
+    local holdUntil = tonumber(State.buharaHoldUntil) or 0
+    if holdUntil > now then
+        return math.max(holdUntil - now, tonumber(Config.delays.event) or 1)
+    end
+    return Config.delays.event
+end
+
 function Feature.feedBuhara(forceAttempt)
     if not forceAttempt and not Feature.isCarryingBuharaFood() then
         return false
@@ -8668,23 +8695,25 @@ function Feature.feedBuhara(forceAttempt)
 
     local target = Feature.findBuharaTarget()
     if not target then
-        Log.push("Buhara target is not visible yet; holding food.")
+        Feature.setBuharaHoldBackoff("Buhara target is not visible yet; holding food.")
         return false
     end
 
     local prompt = Feature.getBuharaFeedPrompt(target)
     if not prompt then
         Feature.moveToBuharaFeedPrompt(target, nil)
-        Log.push("Buhara feed prompt was not found yet; holding food.")
+        Feature.setBuharaHoldBackoff("Buhara feed prompt was not found yet; holding food.")
         return false
     end
 
+    Feature.clearBuharaHoldBackoff()
     for attempt = 1, math.max(tonumber(Config.buhara.feedRetries) or 1, 1) do
         Feature.moveToBuharaFeedPrompt(target, prompt)
         task.wait(0.06)
         Feature.tryBuharaPrompt(prompt)
         task.wait(0.2)
         if not Feature.isCarryingBuharaFood() then
+            Feature.clearBuharaHoldBackoff()
             return true
         end
     end
@@ -8696,6 +8725,7 @@ function Feature.autoBuharaStep()
         return Feature.feedBuhara()
     end
 
+    Feature.clearBuharaHoldBackoff()
     local data = Feature.getBuharaData()
     if Feature.areBuharaRequirementsReady(data) then
         if Feature.dropBuharaFoodIfReady(data) then
@@ -8721,11 +8751,11 @@ end
 function Feature.toggleBuhara(value)
     Config.flags.autoBuhara = value
     if value then
-        Feature.startLoop("autoBuhara", function()
-            return Config.delays.event
-        end, Feature.autoBuharaStep)
+        Feature.clearBuharaHoldBackoff()
+        Feature.startLoop("autoBuhara", Feature.getAutoBuharaLoopDelay, Feature.autoBuharaStep)
     else
         Feature.stopLoop("autoBuhara")
+        Feature.clearBuharaHoldBackoff()
     end
 end
 
