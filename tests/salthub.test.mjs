@@ -364,6 +364,26 @@ test("SaltHub GUI avoids hidden selector rebuild churn", () => {
   assert.match(sliderBody, /now - lastRedraw >= 0\.25/);
 });
 
+test("unit selectors include live search filters for names mutations and traits", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const inventoryBody = source.match(/function UI\.inventoryUnitSelector\(parent, title, unitsGetter, selectedIdGetter, setter, height\)([\s\S]*?)\nfunction UI\.traitSelector/)?.[1] ?? "";
+  const unitMutationBody = source.match(/function UI\.unitMutationSelector\(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height\)([\s\S]*?)\nfunction UI\.statusList/)?.[1] ?? "";
+
+  assert.match(source, /function UI\.searchBox/);
+  assert.match(source, /function UI\.unitSearchText/);
+  assert.match(source, /function UI\.matchesSearch/);
+
+  assert.match(inventoryBody, /UI\.searchBox\(frame, "Search units, mutations, traits"/);
+  assert.match(inventoryBody, /UI\.unitSearchText\(unit/);
+  assert.match(inventoryBody, /UI\.matchesSearch\(.*searchText/);
+  assert.match(source, /box:GetPropertyChangedSignal\("Text"\)/);
+
+  assert.match(unitMutationBody, /UI\.searchBox\(frame, "Search units or mutations"/);
+  assert.match(unitMutationBody, /UI\.unitOptionSearchText/);
+  assert.match(unitMutationBody, /table\.concat\(mutationsGetter\(\) or \{\}, " "\)/);
+  assert.match(unitMutationBody, /UI\.matchesSearch\(.*searchText/);
+});
+
 test("native menu optimizer avoids descendant task storms when native menus build models", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const inspectBody = source.match(/function Feature\.inspectNativeMenuDescendant\(descendant\)([\s\S]*?)\nend/)?.[1] ?? "";

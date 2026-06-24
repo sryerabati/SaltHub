@@ -1908,6 +1908,78 @@ function UI.textBox(parent, title, initial, callback)
     return box
 end
 
+function UI.searchBox(parent, placeholder, onChanged)
+    local box = inst("TextBox", {
+        Name = "Search",
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = Theme.panel2,
+        BackgroundTransparency = 0.08,
+        BorderSizePixel = 0,
+        ClearTextOnFocus = false,
+        Font = Enum.Font.Gotham,
+        PlaceholderText = placeholder or "Search",
+        Text = "",
+        TextColor3 = Theme.text,
+        PlaceholderColor3 = Theme.muted,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, {
+        corner(6),
+        padding(8),
+    })
+    box.Parent = parent
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        onChanged(tostring(box.Text or ""))
+    end)
+    return box
+end
+
+function UI.matchesSearch(value, searchText)
+    local query = normalizeText(searchText)
+    if query == "" then
+        return true
+    end
+
+    local haystack = normalizeText(value)
+    if haystack == "" then
+        return false
+    end
+
+    for token in query:gmatch("%S+") do
+        if not haystack:find(token, 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
+function UI.unitSearchText(unit)
+    if type(unit) ~= "table" then
+        return tostring(unit or "")
+    end
+    return table.concat({
+        tostring(unit.id or ""),
+        tostring(unit.name or unit.Name or ""),
+        tostring(unit.displayName or unit.DisplayName or ""),
+        tostring(unit.mutation or unit.Mutation or ""),
+        tostring(unit.level or unit.Level or ""),
+        tostring(unit.trait or unit.Trait or ""),
+        tostring(unit.rarity or unit.Rarity or ""),
+    }, " ")
+end
+
+function UI.unitOptionSearchText(unitValue, mutationText)
+    if type(unitValue) ~= "table" then
+        return tostring(unitValue or "") .. " " .. tostring(mutationText or "")
+    end
+    return table.concat({
+        tostring(unitValue.name or unitValue.Name or ""),
+        tostring(unitValue.displayName or unitValue.DisplayName or ""),
+        tostring(unitValue.rarity or unitValue.Rarity or ""),
+        tostring(mutationText or ""),
+    }, " ")
+end
+
 function UI.cycle(parent, title, options, getter, setter)
     local button = UI.button(parent, title, function()
         local list = options()
@@ -2128,6 +2200,14 @@ end
 
 function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, setter, height)
     local frame = UI.section(parent, title)
+    local searchText = ""
+    local refresh
+    UI.searchBox(frame, "Search units, mutations, traits", function(text)
+        searchText = text
+        if refresh then
+            refresh()
+        end
+    end)
     local list = inst("ScrollingFrame", {
         Name = "TraitUnitTable",
         Size = UDim2.new(1, 0, 0, height or 190),
@@ -2159,7 +2239,7 @@ function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, 
         return table.concat(parts, "\n")
     end
 
-    local function refresh(units)
+    refresh = function(units)
         units = units or unitsGetter() or {}
         lastSignature = getSignature(units)
         for _, child in ipairs(list:GetChildren()) do
@@ -2170,6 +2250,9 @@ function UI.inventoryUnitSelector(parent, title, unitsGetter, selectedIdGetter, 
 
         local selectedId = tostring(selectedIdGetter() or "")
         for index, unit in ipairs(units) do
+            if not UI.matchesSearch(UI.unitSearchText(unit), searchText) then
+                continue
+            end
             local rarity = State.traitRarity[unit.trait] or TRAIT_RARITY_FALLBACK[unit.trait] or "Common"
             local traitColor = rarityColor(rarity)
             local selected = tostring(unit.id) == selectedId
@@ -2323,6 +2406,14 @@ end
 function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height)
     local frame = UI.section(parent, title)
     local summary = UI.label(frame, "", 24)
+    local searchText = ""
+    local refresh
+    UI.searchBox(frame, "Search units or mutations", function(text)
+        searchText = text
+        if refresh then
+            refresh()
+        end
+    end)
     local list = inst("ScrollingFrame", {
         Name = title .. "Tree",
         Size = UDim2.new(1, 0, 0, height or 260),
@@ -2399,7 +2490,7 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
         commit(unitMap, mutationTargets)
     end
 
-    local function refresh()
+    refresh = function()
         for _, child in ipairs(list:GetChildren()) do
             if child ~= layout then
                 child:Destroy()
@@ -2417,7 +2508,11 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
         summary.Text = selectedCount == 0 and "No unit targets selected" or (tostring(selectedCount) .. " unit targets selected")
 
         local lastRarity = nil
+        local mutationSearchText = table.concat(mutationsGetter() or {}, " ")
         for index, unitValue in ipairs(unitsGetter() or {}) do
+            if not UI.matchesSearch(UI.unitOptionSearchText(unitValue, mutationSearchText), searchText) then
+                continue
+            end
             local unit = type(unitValue) == "table" and tostring(unitValue.name or unitValue.Name or "") or tostring(unitValue)
             local displayName = type(unitValue) == "table" and tostring(unitValue.displayName or unitValue.DisplayName or unit) or unit
             local rarity = type(unitValue) == "table" and tostring(unitValue.rarity or unitValue.Rarity or State.characterRarity[unit] or "Common") or tostring(State.characterRarity[unit] or "Common")
