@@ -59,6 +59,7 @@ local Config = {
         buyScan = 0.12,
         rollSettle = 0.55,
         buyReservePause = 4.0,
+        fastRollBuyHold = 1.75,
         buyRetryPoll = 0.35,
         buyConfirmTimeout = 2.5,
         buyAttemptWindow = 8.0,
@@ -799,6 +800,8 @@ local State = {
     rollBusyUntil = 0,
     pityHoldUntil = 0,
     lastBuyAt = 0,
+    fastRollOwned = false,
+    fastRollOwnedCachedAt = 0,
     buyingCharacter = false,
     pendingBuy = nil,
     lastAntiAfkAt = 0,
@@ -4494,6 +4497,42 @@ function Feature.findRolledCharacterByKey(key)
     return nil
 end
 
+function Feature.hasFastRollOwned()
+    local now = os.clock()
+    if now - (State.fastRollOwnedCachedAt or 0) < 10 then
+        return State.fastRollOwned == true
+    end
+
+    local owned = false
+    pcall(function()
+        for _, inst in ipairs(PlayerGui:GetDescendants()) do
+            if inst.Name == "FastRoll" and inst:IsA("Frame") then
+                local ownedFrame = inst:FindFirstChild("Owned")
+                if ownedFrame and ownedFrame:IsA("GuiObject") and ownedFrame.Visible then
+                    for _, descendant in ipairs(inst:GetDescendants()) do
+                        if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+                            if normalizeText(descendant.Text) == "fast roll" then
+                                owned = true
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    State.fastRollOwned = owned
+    State.fastRollOwnedCachedAt = now
+    return owned
+end
+
+function Feature.getFastRollBuyHold()
+    if Feature.hasFastRollOwned() then
+        return tonumber(Config.delays.fastRollBuyHold) or 1.75
+    end
+    return 0
+end
+
 function Feature.extendPendingBuyHold()
     if not State.pendingBuy then
         return
@@ -4504,6 +4543,11 @@ end
 function Feature.findPendingBuyCandidate()
     local pending = State.pendingBuy
     if not pending or not pending.key then
+        return nil
+    end
+
+    if pending.buyAt and os.clock() < pending.buyAt then
+        Feature.extendPendingBuyHold()
         return nil
     end
 
@@ -4535,6 +4579,7 @@ function Feature.setPendingBuy(entry)
         mutation = entry.mutation,
         price = price,
         createdAt = now,
+        buyAt = now + Feature.getFastRollBuyHold(),
         expiresAt = now + (tonumber(Config.delays.buyAttemptWindow) or 8.0),
     }
     Feature.extendPendingBuyHold()
@@ -4967,6 +5012,12 @@ end
 function Feature.getAutoRollLoopDelay()
     local baseDelay = tonumber(Config.delays.roll) or 0.12
     if State.buyingCharacter or State.pendingBuy then
+        if State.pendingBuy then
+            local buyAtRemaining = (State.pendingBuy.buyAt or 0) - os.clock()
+            if buyAtRemaining > 0 then
+                return math.max(tonumber(Config.delays.buyRetryPoll) or 0.35, buyAtRemaining)
+            end
+        end
         return tonumber(Config.delays.buyRetryPoll) or 0.35
     end
     local holdRemaining = (tonumber(State.pityHoldUntil) or 0) - os.clock()

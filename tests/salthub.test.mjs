@@ -646,13 +646,22 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   const source = fs.readFileSync(sourcePath, "utf8");
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const buyBody = source.match(/function Feature\.buyRolledCharacter\(entry\)([\s\S]*?)\nfunction Feature\.getRollPityEntries/)?.[1] ?? "";
+  const pendingBody = source.match(/function Feature\.findPendingBuyCandidate\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const setPendingBody = source.match(/function Feature\.setPendingBuy\(entry\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
   assert.match(source, /buyReservePause = 4\.0/);
+  assert.match(source, /fastRollBuyHold = 1\.75/);
   assert.match(source, /function Feature\.reserveBuyBeforeRolling/);
+  assert.match(source, /function Feature\.hasFastRollOwned/);
   assert.match(source, /function Feature\.teleportToPrompt/);
   assert.match(rollBody, /local reserved = Feature\.reserveBuyBeforeRolling\(\)/);
   assert.match(rollBody, /if reserved then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
   assert.match(rollBody, /Feature\.rollOnce\(\)/);
+  assert.match(setPendingBody, /buyAt = now \+ Feature\.getFastRollBuyHold\(\)/);
+  assert.match(pendingBody, /if pending\.buyAt and os\.clock\(\) < pending\.buyAt then[\s\S]*?Feature\.extendPendingBuyHold\(\)[\s\S]*?return nil/);
+  assert.match(delayBody, /local buyAtRemaining = \(State\.pendingBuy\.buyAt or 0\) - os\.clock\(\)/);
+  assert.match(delayBody, /return math\.max\(tonumber\(Config\.delays\.buyRetryPoll\) or 0\.35, buyAtRemaining\)/);
   assert.match(buyBody, /local current = Feature\.findRolledCharacterByKey\(key\) or entry/);
   assert.match(buyBody, /Feature\.teleportToPrompt\(current\.prompt, 3\.15\)/);
   assert.match(buyBody, /if prompted and Feature\.waitForRolledCharacterGone\(key, tonumber\(Config\.delays\.buyConfirmTimeout\) or 2\.5\) then/);
