@@ -77,6 +77,7 @@ local Config = {
         bestLineup = 6.0,
         event = 1.0,
         battlepass = 10.0,
+        vipReward = 30.0,
         antiAfkCooldown = 60,
     },
     flags = {
@@ -94,6 +95,7 @@ local Config = {
         autoBestLineup = false,
         autoBuhara = false,
         autoBattlepass = false,
+        autoVipRewards = false,
         optimizeNativeMenus = true,
     },
     wave = {
@@ -683,6 +685,7 @@ local Remote = {
         MoveCharacter = { "ReplicatedStorage", "Remotes", "Characters", "MoveCharacter" },
         SellCharacters = { "ReplicatedStorage", "Remotes", "NPCEvents", "SellCharacters" },
         FreeRewards = { "ReplicatedStorage", "Remotes", "FreeRewards", "FreeRewards" },
+        ClaimVIP = { "ReplicatedStorage", "Remotes", "ClaimVIP" },
         BattlepassClaim = { "ReplicatedStorage", "Battlepass", "Claim" },
         BattlepassQuestClaim = { "ReplicatedStorage", "BattlepassQuest", "ClaimQuest" },
         BattlepassQuestData = { "ReplicatedStorage", "BattlepassQuest", "GetQuestData" },
@@ -803,7 +806,10 @@ local State = {
     autoMergeIdleUntil = 0,
     mergeRejectedUntil = 0,
     lastNativeMenuPauseLogAt = 0,
+    spinStatus = "Waiting for data.",
+    spinBusyUntil = 0,
     battlepassStatus = "Waiting for data.",
+    vipRewardStatus = "Waiting for data.",
     waveStatus = "-",
     lastWaveStartAt = 0,
     lastRollAt = 0,
@@ -3994,16 +4000,143 @@ function Feature.setAutoFastForward(value)
     end
 end
 
+function Feature.getSpinCount()
+    local count = tonumber(Feature.dataGet("Spin", 0)) or 0
+    return math.max(0, math.floor(count))
+end
+
+function Feature.spinWheelOnce()
+    local now = os.clock()
+    local busyUntil = tonumber(State.spinBusyUntil) or 0
+    if now < busyUntil then
+        return false
+    end
+
+    local spins = Feature.getSpinCount()
+    if spins <= 0 then
+        State.spinStatus = "Spin Wheel: 0 spins available."
+        return false
+    end
+
+    local ok = Remote.fire("SpinWheel", "Spin")
+    if ok then
+        State.spinBusyUntil = now + 6.5
+        State.spinStatus = "Spin Wheel: used 1 spin (" .. tostring(spins) .. " before spin)."
+        Log.push(State.spinStatus)
+    end
+    return ok
+end
+
 function Feature.setAutoSpin(value)
     Config.flags.autoSpin = value
     if value then
         Feature.startLoop("autoSpin", function()
             return Config.delays.event
-        end, function()
-            Remote.fire("SpinWheel")
-        end)
+        end, Feature.spinWheelOnce)
     else
         Feature.stopLoop("autoSpin")
+    end
+end
+
+function Feature.getVipRewardData()
+    local data = Feature.dataGet("VIPReward", nil)
+    if type(data) == "table" then
+        return data
+    end
+    return {}
+end
+
+function Feature.getVipRewardGuiStatus()
+    local status = {
+        claimVisible = false,
+        claimActive = false,
+        buttonText = "",
+        infoText = "",
+        timerText = "",
+    }
+    local main = PlayerGui:FindFirstChild("MainUI")
+    local frames = main and main:FindFirstChild("Frames")
+    local vipRewards = frames and frames:FindFirstChild("VIPRewards")
+    local vipFrame = vipRewards and vipRewards:FindFirstChild("VIPFrame")
+    local buttons = vipFrame and vipFrame:FindFirstChild("Buttons")
+    local claim = buttons and buttons:FindFirstChild("Claim")
+    local button = claim and claim:FindFirstChild("Button")
+    local buttonText = button and button:FindFirstChild("TextLabel")
+    local infoText = buttons and buttons:FindFirstChild("TextLabel")
+    local monetizations = workspace:FindFirstChild("Monetizations")
+    local vipChest = monetizations and monetizations:FindFirstChild("VIP chest")
+    local restockGui = vipChest and vipChest:FindFirstChild("RestockGUI")
+    local timerLabel = restockGui and restockGui:FindFirstChild("TimerLabel")
+
+    if claim then
+        status.claimVisible = claim.Visible == true
+        status.claimActive = claim.Active == true
+    end
+    if buttonText and buttonText:IsA("TextLabel") then
+        status.buttonText = tostring(buttonText.Text or "")
+    end
+    if infoText and infoText:IsA("TextLabel") then
+        status.infoText = tostring(infoText.Text or "")
+    end
+    if timerLabel and timerLabel:IsA("TextLabel") then
+        status.timerText = tostring(timerLabel.Text or "")
+    end
+    return status
+end
+
+function Feature.isVipRewardClaimable(data, guiStatus)
+    if LocalPlayer:GetAttribute("VIP") ~= true then
+        return false
+    end
+    if type(data) == "table" and data.CanClaim == true then
+        return true
+    end
+    if type(data) == "table" and data.CanClaim ~= false and data.Claimed == false then
+        return true
+    end
+
+    local status = guiStatus or Feature.getVipRewardGuiStatus()
+    if status.claimVisible and status.claimActive and normalizeText(status.buttonText) == "claim" then
+        return true
+    end
+    return normalizeText(status.timerText):find("claim your reward", 1, true) ~= nil
+end
+
+function Feature.claimVipRewardOnce()
+    if LocalPlayer:GetAttribute("VIP") ~= true then
+        State.vipRewardStatus = "VIP rewards require VIP."
+        return false
+    end
+
+    Remote.fire("ClaimVIP", "Sync")
+    task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.15))
+
+    local data = Feature.getVipRewardData()
+    local guiStatus = Feature.getVipRewardGuiStatus()
+    if not Feature.isVipRewardClaimable(data, guiStatus) then
+        local statusText = guiStatus.infoText ~= "" and guiStatus.infoText or guiStatus.timerText
+        State.vipRewardStatus = statusText ~= "" and statusText or "VIP reward not claimable yet."
+        return false
+    end
+
+    local ok = Remote.fire("ClaimVIP", "Claim")
+    if ok then
+        State.vipRewardStatus = "VIP reward claim sent."
+        Log.push(State.vipRewardStatus)
+        task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.15))
+        Remote.fire("ClaimVIP", "Sync")
+    end
+    return ok
+end
+
+function Feature.toggleVipRewards(value)
+    Config.flags.autoVipRewards = value
+    if value then
+        Feature.startLoop("autoVipRewards", function()
+            return Config.delays.vipReward or Config.delays.battlepass
+        end, Feature.claimVipRewardOnce)
+    else
+        Feature.stopLoop("autoVipRewards")
     end
 end
 
@@ -5186,6 +5319,9 @@ function Feature.startLoadedAutomationSettings()
     end
     if Config.flags.autoSpin then
         Feature.setAutoSpin(true)
+    end
+    if Config.flags.autoVipRewards then
+        Feature.toggleVipRewards(true)
     end
 end
 
@@ -9519,6 +9655,9 @@ local Tabs = {
             UI.toggle(misc, "Auto Battlepass Claim", function()
                 return Config.flags.autoBattlepass
             end, Feature.toggleBattlepass)
+            UI.toggle(misc, "Auto VIP Rewards", function()
+                return Config.flags.autoVipRewards
+            end, Feature.toggleVipRewards)
             UI.toggle(misc, "Claim Free Track", function()
                 return Config.battlepass.claimFree
             end, function(value)

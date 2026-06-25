@@ -209,6 +209,7 @@ test("saved automation switches start their actions on load", () => {
     ["autoBuhara", "Feature.toggleBuhara(true)"],
     ["autoBattlepass", "Feature.toggleBattlepass(true)"],
     ["autoSpin", "Feature.setAutoSpin(true)"],
+    ["autoVipRewards", "Feature.toggleVipRewards(true)"],
   ];
 
   assert.match(source, /function Feature\.setAutoSpin\(value\)/);
@@ -218,6 +219,38 @@ test("saved automation switches start their actions on load", () => {
   for (const [flag, action] of expectedStartupActions) {
     assert.match(startupBody, new RegExp(`if Config\\.flags\\.${flag} then\\s+${action.replace(/[().]/g, "\\$&")}`));
   }
+});
+
+test("auto spin wheel follows the live client remote contract", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const countBody = source.match(/function Feature\.getSpinCount\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const spinBody = source.match(/function Feature\.spinWheelOnce\(\)([\s\S]*?)\nfunction Feature\.setAutoSpin/)?.[1] ?? "";
+  const toggleBody = source.match(/function Feature\.setAutoSpin\(value\)([\s\S]*?)\nfunction Feature\.getRollPrompt/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.getSpinCount/);
+  assert.match(countBody, /Feature\.dataGet\("Spin", 0\)/);
+  assert.match(spinBody, /Remote\.fire\("SpinWheel", "Spin"\)/);
+  assert.doesNotMatch(spinBody, /Remote\.fire\("SpinWheel"\)/);
+  assert.match(toggleBody, /Feature\.startLoop\("autoSpin"[\s\S]*Feature\.spinWheelOnce/);
+  assert.doesNotMatch(toggleBody, /Remote\.fire\("SpinWheel"\)/);
+});
+
+test("auto VIP rewards sync and claim through the ClaimVIP remote", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const claimBody = source.match(/function Feature\.claimVipRewardOnce\(\)([\s\S]*?)\nfunction Feature\.toggleVipRewards/)?.[1] ?? "";
+  const toggleBody = source.match(/function Feature\.toggleVipRewards\(value\)([\s\S]*?)\nfunction Feature\.getRollPrompt/)?.[1] ?? "";
+  const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /autoVipRewards = false/);
+  assert.match(source, /ClaimVIP = \{ "ReplicatedStorage", "Remotes", "ClaimVIP" \}/);
+  assert.match(source, /function Feature\.getVipRewardData/);
+  assert.match(source, /function Feature\.isVipRewardClaimable/);
+  assert.match(claimBody, /LocalPlayer:GetAttribute\("VIP"\)/);
+  assert.match(claimBody, /Remote\.fire\("ClaimVIP", "Sync"\)/);
+  assert.match(claimBody, /Remote\.fire\("ClaimVIP", "Claim"\)/);
+  assert.match(toggleBody, /Feature\.startLoop\("autoVipRewards"/);
+  assert.match(source, /UI\.toggle\(misc, "Auto VIP Rewards"[\s\S]*?Feature\.toggleVipRewards/);
+  assert.match(startupBody, /if Config\.flags\.autoVipRewards then\s+Feature\.toggleVipRewards\(true\)/);
 });
 
 test("anti afk is enabled by default and user-toggleable in settings", () => {
