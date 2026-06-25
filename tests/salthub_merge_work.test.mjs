@@ -193,6 +193,21 @@ test("auto duplicate merge uses cascade instead of dumping every same-level unit
   assert.doesNotMatch(autoMergeStep, /Feature\.executeMergePlan\(plan\)/);
 });
 
+test("auto merge stops at configured max merge level", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const isMergeSelectableTarget = source.match(/function Feature\.isMergeSelectableTarget\(unit\)[\s\S]*?\nend/)?.[0] ?? "";
+  const getMergeCandidates = source.match(/function Feature\.getMergeCandidates\(selected\)[\s\S]*?\nend/)?.[0] ?? "";
+  const executeTargetMergeCascade = source.match(/function Feature\.executeTargetMergeCascade\(selected\)[\s\S]*?\nend/)?.[0] ?? "";
+
+  assert.match(source, /maxLevel = 7/);
+  assert.match(source, /function Feature\.maxMergeLevel/);
+  assert.match(isMergeSelectableTarget, /Feature\.unitMergeLevel\(unit\) >= Feature\.maxMergeLevel\(\)/);
+  assert.match(getMergeCandidates, /Feature\.unitMergeLevel\(unit\) < Feature\.maxMergeLevel\(\)/);
+  assert.match(executeTargetMergeCascade, /local maxMergeLevel = Feature\.maxMergeLevel\(\)/);
+  assert.match(executeTargetMergeCascade, /if targetLevel >= maxMergeLevel then/);
+  assert.match(executeTargetMergeCascade, /Target merge complete: level "\s*\.\.\s*tostring\(targetLevel\)\s*\.\.\s*" is max\./);
+});
+
 test("placed model lookup does not pick up a same-name model when the unit id is known", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const findPlacedUnitModel = source.match(/function Feature\.findPlacedUnitModel\(unit\)[\s\S]*?\nend/)?.[0] ?? "";

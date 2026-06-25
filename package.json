@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "serve": "node scripts/serve-salthub.mjs",
-    "test": "node --test tests"
+    "test": "node --test tests/*.mjs"
   },
   "license": "MIT"
 }

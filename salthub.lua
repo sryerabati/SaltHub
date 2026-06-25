@@ -111,6 +111,7 @@ local Config = {
     merge = {
         targetUnitId = "",
         targetUnitName = "",
+        maxLevel = 7,
         keepMutations = true,
         blacklist = {},
     },
@@ -7260,6 +7261,10 @@ function Feature.unitMergeLevel(unit)
     return math.max(tonumber(unit and unit.level) or 1, 1)
 end
 
+function Feature.maxMergeLevel()
+    return math.max(tonumber(Config.merge and Config.merge.maxLevel) or 7, 1)
+end
+
 function Feature.mergeMutationKey(mutation)
     local clean = normalizeText(mutation)
     if clean == "" or clean == "none" or clean == "normal" then
@@ -7287,6 +7292,9 @@ function Feature.isMergeSelectableTarget(unit)
         return false
     end
     if tostring(unit.level or "") == "?" then
+        return false
+    end
+    if Feature.unitMergeLevel(unit) >= Feature.maxMergeLevel() then
         return false
     end
     if textMatchesAny(unit.name, Config.merge.blacklist) then
@@ -7659,7 +7667,11 @@ function Feature.getMergeCandidates(selected)
         if selectedKey ~= "" and key ~= selectedKey then
             continue
         end
-        if unit and not unit.locked and not textMatchesAny(unit.name, Config.merge.blacklist) then
+        if unit
+            and not unit.locked
+            and not textMatchesAny(unit.name, Config.merge.blacklist)
+            and Feature.unitMergeLevel(unit) < Feature.maxMergeLevel()
+        then
             if Feature.getShapeFootprint(unit.name) then
                 table.insert(candidates, unit)
             end
@@ -8143,6 +8155,10 @@ function Feature.mergeUnitsOnCell(anchor, fodder, cell)
     end
 
     local anchorLevel = Feature.unitMergeLevel(anchor)
+    if anchorLevel >= Feature.maxMergeLevel() then
+        Log.push("Merge stopped: level " .. tostring(anchorLevel) .. " is max.")
+        return nil
+    end
     Feature.pickupUnitForMerge(anchor)
     Feature.pickupUnitForMerge(fodder)
     if not Feature.placeUnitForMerge(anchor, cell) then
@@ -8176,6 +8192,10 @@ function Feature.mergeFodderIntoPlacedAnchor(anchor, fodder, cell)
     end
 
     local anchorLevel = Feature.unitMergeLevel(anchor)
+    if anchorLevel >= Feature.maxMergeLevel() then
+        Log.push("Merge stopped: level " .. tostring(anchorLevel) .. " is max.")
+        return nil
+    end
     local mergeCell = Feature.waitForMergeCell(anchor, cell)
     if not mergeCell then
         Log.push("Merge stopped: selected anchor is not placed.")
@@ -8245,6 +8265,12 @@ function Feature.executeTargetMergeCascade(selected)
         Log.push("Selected merge target needs a known level.")
         return false
     end
+    local maxMergeLevel = Feature.maxMergeLevel()
+    local startingLevel = Feature.unitMergeLevel(target)
+    if startingLevel >= maxMergeLevel then
+        Log.push("Target merge complete: level " .. tostring(startingLevel) .. " is max.")
+        return false
+    end
 
     local originalTrait = tostring(target.trait or "None")
     local targetCell = Feature.getMergeAnchorCell(target, { target })
@@ -8275,6 +8301,10 @@ function Feature.executeTargetMergeCascade(selected)
     for depth = 1, 12 do
         target = Feature.refreshMergeTarget(target)
         local targetLevel = Feature.unitMergeLevel(target)
+        if targetLevel >= maxMergeLevel then
+            Log.push("Target merge complete: level " .. tostring(targetLevel) .. " is max.")
+            break
+        end
         local usedIds = {
             [tostring(target.id or "")] = true,
         }
