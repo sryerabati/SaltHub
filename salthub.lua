@@ -109,6 +109,15 @@ local Config = {
         snipeEvents = {},
         unitRules = {},
         rollStationBehindDistance = 5.6,
+        smoothMovement = true,
+        promptDistance = 3.15,
+        promptApproachJitter = 0.85,
+        promptMoveTimeout = 2.2,
+        promptDelayMin = 0.08,
+        promptDelayMax = 0.28,
+        promptHoldExtraMin = 0.08,
+        promptHoldExtraMax = 0.2,
+        promptTeleportFallback = false,
     },
     merge = {
         targetUnitId = "",
@@ -286,6 +295,13 @@ local function applyAutoRollTimingSafetyDefaults()
     Config.delays.buyAttemptWindow = math.max(tonumber(Config.delays.buyAttemptWindow) or 0, 8.0)
     Config.delays.buyRetryPoll = math.max(tonumber(Config.delays.buyRetryPoll) or 0, 0.35)
     Config.delays.fastRollRollSettle = math.max(tonumber(Config.delays.fastRollRollSettle or Config.delays.fastRollBuyHold) or 0, 2.75)
+    Config.roll.promptDistance = math.max(tonumber(Config.roll.promptDistance) or 3.15, 0.75)
+    Config.roll.promptApproachJitter = math.max(tonumber(Config.roll.promptApproachJitter) or 0.85, 0)
+    Config.roll.promptMoveTimeout = math.max(tonumber(Config.roll.promptMoveTimeout) or 2.2, Config.delays.moveTimeout or 1.35)
+    Config.roll.promptDelayMin = math.max(tonumber(Config.roll.promptDelayMin) or 0, 0)
+    Config.roll.promptDelayMax = math.max(tonumber(Config.roll.promptDelayMax) or 0, Config.roll.promptDelayMin)
+    Config.roll.promptHoldExtraMin = math.max(tonumber(Config.roll.promptHoldExtraMin) or 0, 0)
+    Config.roll.promptHoldExtraMax = math.max(tonumber(Config.roll.promptHoldExtraMax) or 0, Config.roll.promptHoldExtraMin)
 end
 
 local workspaceConfigLoaded = false
@@ -4366,6 +4382,96 @@ function Feature.teleportToPrompt(prompt, distance)
     return Feature.teleportToCFrame(CFrame.lookAt(targetPosition, targetPart.Position))
 end
 
+function Feature.randomBetween(min, max)
+    local low = tonumber(min) or 0
+    local high = tonumber(max) or low
+    if high < low then
+        low, high = high, low
+    end
+    if high == low then
+        return low
+    end
+    return low + (math.random() * (high - low))
+end
+
+function Feature.getPromptDistance(prompt)
+    local root = Feature.getCharacterRoot()
+    local targetPart = Feature.getTargetPart(prompt)
+    if not root or not targetPart then
+        return nil
+    end
+    return (root.Position - targetPart.Position).Magnitude
+end
+
+function Feature.isPromptWithinActivationRange(prompt, margin)
+    if not prompt or not prompt:IsA("ProximityPrompt") then
+        return false
+    end
+    local distance = Feature.getPromptDistance(prompt)
+    if not distance then
+        return false
+    end
+    local maxDistance = tonumber(prompt.MaxActivationDistance) or 10
+    return distance <= math.max(maxDistance - (tonumber(margin) or 0), 0)
+end
+
+function Feature.getPromptApproachCFrame(prompt, distance)
+    local root = Feature.getCharacterRoot()
+    local targetPart = Feature.getTargetPart(prompt)
+    if not root or not targetPart then
+        return nil
+    end
+
+    local direction = root.Position - targetPart.Position
+    direction = Vector3.new(direction.X, 0, direction.Z)
+    if direction.Magnitude < 0.1 then
+        direction = -Vector3.new(targetPart.CFrame.LookVector.X, 0, targetPart.CFrame.LookVector.Z)
+    end
+    if direction.Magnitude < 0.1 then
+        direction = Vector3.new(0, 0, -1)
+    else
+        direction = direction.Unit
+    end
+
+    local jitter = tonumber(Config.roll.promptApproachJitter) or 0
+    local sideOffset = Feature.randomBetween(-jitter, jitter)
+    local tangent = Vector3.new(-direction.Z, 0, direction.X)
+    local offset = math.max(tonumber(distance) or Config.roll.promptDistance or 3.15, 0.75)
+    local targetPosition = targetPart.Position + direction * offset + tangent * sideOffset
+    targetPosition = Vector3.new(targetPosition.X, targetPart.Position.Y, targetPosition.Z)
+    return CFrame.lookAt(targetPosition, targetPart.Position)
+end
+
+function Feature.waitNaturalPromptDelay()
+    local delay = Feature.randomBetween(Config.roll.promptDelayMin, Config.roll.promptDelayMax)
+    if delay > 0 then
+        task.wait(delay)
+    end
+end
+
+function Feature.moveToPromptNaturally(prompt, distance)
+    if not Config.roll.smoothMovement then
+        return Feature.teleportToPrompt(prompt, distance)
+    end
+
+    local targetCFrame = Feature.getPromptApproachCFrame(prompt, distance)
+    if not targetCFrame then
+        return false
+    end
+
+    Feature.moveToCFrame(targetCFrame, Config.roll.promptMoveTimeout, false)
+    if not Feature.isPromptWithinActivationRange(prompt, 0.35) then
+        if Config.roll.promptTeleportFallback then
+            return Feature.teleportToPrompt(prompt, distance)
+        end
+        Log.push("Prompt was not reached naturally; retrying next loop.")
+        return false
+    end
+
+    Feature.waitNaturalPromptDelay()
+    return true
+end
+
 function Feature.returnToRollStation()
     local station = Feature.getRollStationCFrame()
     if not station then
@@ -4483,6 +4589,27 @@ function Feature.holdPrompt(prompt)
     return Feature.holdKey(key, (tonumber(prompt.HoldDuration) or 0) + 0.15)
 end
 
+function Feature.holdPromptNaturally(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then
+        return false
+    end
+
+    if Config.roll.smoothMovement
+        and Feature.canSafelyUseKeyForPrompt(prompt)
+        and Feature.isPromptWithinActivationRange(prompt, 0.15) then
+        local key = prompt.KeyboardKeyCode
+        if key == Enum.KeyCode.Unknown then
+            key = Enum.KeyCode.E
+        end
+        local holdDuration = (tonumber(prompt.HoldDuration) or 0)
+            + 0.15
+            + Feature.randomBetween(Config.roll.promptHoldExtraMin, Config.roll.promptHoldExtraMax)
+        return Feature.holdKey(key, holdDuration)
+    end
+
+    return Feature.holdPrompt(prompt)
+end
+
 function Feature.rollOnce()
     local prompt = Feature.getRollPrompt()
     if not prompt then
@@ -4490,9 +4617,10 @@ function Feature.rollOnce()
         return false
     end
 
-    Feature.teleportToPrompt(prompt, 3.15)
-    task.wait(0.05)
-    local ok = Feature.holdPrompt(prompt)
+    if not Feature.moveToPromptNaturally(prompt, Config.roll.promptDistance) then
+        return false
+    end
+    local ok = Feature.holdPromptNaturally(prompt)
     if ok then
         State.lastRollAt = os.clock()
         State.rollBusyUntil = State.lastRollAt + Feature.getRollSettleDelay()
@@ -4814,9 +4942,8 @@ function Feature.buyRolledCharacter(entry)
             end
 
             Feature.extendPendingBuyHold()
-            Feature.teleportToPrompt(current.prompt, 3.15)
-            task.wait(0.12)
-            local prompted = Feature.holdPrompt(current.prompt)
+            local moved = Feature.moveToPromptNaturally(current.prompt, Config.roll.promptDistance)
+            local prompted = moved and Feature.holdPromptNaturally(current.prompt)
             Feature.extendPendingBuyHold()
             if prompted and Feature.waitForRolledCharacterGone(key, tonumber(Config.delays.buyConfirmTimeout) or 2.5) then
                 bought = true
@@ -9527,6 +9654,12 @@ local Tabs = {
             UI.toggle(main, "Auto Buy", function()
                 return Config.flags.autoBuy
             end, Feature.toggleAutoBuy)
+            UI.toggle(main, "Smooth Roll Movement", function()
+                return Config.roll.smoothMovement
+            end, function(value)
+                Config.roll.smoothMovement = value
+                Feature.applyAutoRollSettingsLocal()
+            end)
             UI.toggle(main, "Hold Pity For Event", function()
                 return Config.flags.holdPityForEvent
             end, function(value)

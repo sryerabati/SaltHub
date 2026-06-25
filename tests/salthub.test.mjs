@@ -498,9 +498,12 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   assert.match(source, /function Feature\.findMatchingRolledCharacter/);
   assert.match(source, /function Feature\.holdKey/);
   assert.match(source, /function Feature\.holdPrompt/);
+  assert.match(source, /function Feature\.holdPromptNaturally/);
   assert.match(source, /function Feature\.triggerPromptExact/);
   assert.match(source, /function Feature\.getNearbyPromptConflicts/);
   assert.match(source, /function Feature\.canSafelyUseKeyForPrompt/);
+  assert.match(source, /function Feature\.getPromptApproachCFrame/);
+  assert.match(source, /function Feature\.moveToPromptNaturally/);
   assert.match(source, /function Feature\.teleportToInstance/);
   assert.match(source, /function Feature\.moveToCFrame/);
   assert.match(source, /function Feature\.moveNearInstance/);
@@ -588,28 +591,51 @@ test("prompt activation is exact so rolling cannot accidentally buy podium units
   assert.match(holdBody, /if not Feature\.canSafelyUseKeyForPrompt\(prompt\) then[\s\S]*?return false/);
   assert.match(holdBody, /return Feature\.holdKey/);
 
+  const naturalHoldBody = source.match(/function Feature\.holdPromptNaturally\(prompt\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(naturalHoldBody, /Config\.roll\.smoothMovement/);
+  assert.match(naturalHoldBody, /Feature\.canSafelyUseKeyForPrompt\(prompt\)/);
+  assert.match(naturalHoldBody, /Feature\.isPromptWithinActivationRange\(prompt/);
+  assert.match(naturalHoldBody, /Feature\.holdKey\(key, holdDuration\)/);
+  assert.match(naturalHoldBody, /return Feature\.holdPrompt\(prompt\)/);
+
   const rollBody = source.match(/function Feature\.rollOnce\(\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
-  assert.match(rollBody, /local ok = Feature\.holdPrompt\(prompt\)/);
+  assert.match(rollBody, /Feature\.moveToPromptNaturally\(prompt, Config\.roll\.promptDistance\)/);
+  assert.match(rollBody, /local ok = Feature\.holdPromptNaturally\(prompt\)/);
   assert.doesNotMatch(rollBody, /Feature\.returnToRollStation\(\)/);
-  assert.doesNotMatch(rollBody, /Feature\.holdKey/);
+  assert.doesNotMatch(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
 });
 
-test("auto roll uses prompt teleporting instead of walking", () => {
+test("auto roll uses smooth prompt movement instead of direct prompt teleporting", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /rollStationBehindDistance = 5\.6/);
+  assert.match(source, /smoothMovement = true/);
+  assert.match(source, /promptDistance = 3\.15/);
+  assert.match(source, /promptApproachJitter = 0\.85/);
+  assert.match(source, /promptDelayMin = 0\.08/);
+  assert.match(source, /promptDelayMax = 0\.28/);
   assert.match(source, /function Feature\.getRollButtonRearDirection/);
   assert.match(source, /function Feature\.getRollStationLookTarget/);
+  assert.match(source, /function Feature\.getPromptApproachCFrame/);
+  assert.match(source, /function Feature\.moveToPromptNaturally/);
   assert.match(source, /local rearDirection = Feature\.getRollButtonRearDirection\(buttonPart, lookAt\)/);
   assert.match(source, /local station = buttonPart\.Position \+ rearDirection \* Config\.roll\.rollStationBehindDistance/);
   assert.match(source, /return CFrame\.lookAt\(station, Vector3\.new\(lookAt\.X, station\.Y, lookAt\.Z\)\)/);
 
   const stationBody = source.match(/function Feature\.getRollStationCFrame\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(stationBody, /buttonPart\.Position - direction \* 4\.2/);
+  const approachBody = source.match(/function Feature\.getPromptApproachCFrame\(prompt, distance\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(approachBody, /Feature\.randomBetween\(-jitter, jitter\)/);
+  assert.match(approachBody, /tangent \* sideOffset/);
+  const moveBody = source.match(/function Feature\.moveToPromptNaturally\(prompt, distance\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(moveBody, /Feature\.moveToCFrame\(targetCFrame, Config\.roll\.promptMoveTimeout, false\)/);
+  assert.match(moveBody, /Feature\.waitNaturalPromptDelay\(\)/);
+  assert.match(moveBody, /if not Config\.roll\.smoothMovement then[\s\S]*?Feature\.teleportToPrompt\(prompt, distance\)/);
   const rollBody = source.match(/function Feature\.rollOnce\(\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
+  assert.match(rollBody, /Feature\.moveToPromptNaturally\(prompt, Config\.roll\.promptDistance\)/);
   assert.doesNotMatch(rollBody, /Feature\.returnToRollStation\(\)/);
+  assert.doesNotMatch(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
+  assert.match(source, /UI\.toggle\(main, "Smooth Roll Movement"/);
 });
 
 test("auto roll settles between rolls and auto buy can run independently", () => {
@@ -681,7 +707,7 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.match(delayBody, /if State\.buyingCharacter or State\.pendingBuy then[\s\S]*?return tonumber\(Config\.delays\.buyRetryPoll\) or 0\.35/);
 });
 
-test("auto roll reserves and teleports to wanted buys before rolling again", () => {
+test("auto roll reserves and moves to wanted buys before rolling again", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const buyBody = source.match(/function Feature\.buyRolledCharacter\(entry\)([\s\S]*?)\nfunction Feature\.getRollPityEntries/)?.[1] ?? "";
@@ -699,6 +725,7 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   assert.match(source, /function Feature\.reserveBuyBeforeRolling/);
   assert.match(source, /function Feature\.hasFastRollOwned/);
   assert.match(source, /function Feature\.teleportToPrompt/);
+  assert.match(source, /function Feature\.moveToPromptNaturally/);
   assert.match(rollBody, /local reserved = Feature\.reserveBuyBeforeRolling\(\)/);
   assert.match(rollBody, /if reserved then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
   assert.match(rollBody, /Feature\.rollOnce\(\)/);
@@ -711,10 +738,13 @@ test("auto roll reserves and teleports to wanted buys before rolling again", () 
   assert.match(autoRollSafetyBody, /Config\.delays\.rollSettle = math\.max\(tonumber\(Config\.delays\.rollSettle\) or 0, 1\.25\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.buyReservePause = math\.max\(tonumber\(Config\.delays\.buyReservePause\) or 0, 4\.0\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.fastRollRollSettle = math\.max\(tonumber\(Config\.delays\.fastRollRollSettle or Config\.delays\.fastRollBuyHold\) or 0, 2\.75\)/);
+  assert.match(autoRollSafetyBody, /Config\.roll\.promptDelayMin = math\.max\(tonumber\(Config\.roll\.promptDelayMin\) or 0, 0\)/);
+  assert.match(autoRollSafetyBody, /Config\.roll\.promptDelayMax = math\.max\(tonumber\(Config\.roll\.promptDelayMax\) or 0, Config\.roll\.promptDelayMin\)/);
   assert.match(source, /applyAutoRollTimingSafetyDefaults\(\)/);
   assert.match(importBody, /applyAutoRollTimingSafetyDefaults\(\)/);
   assert.match(buyBody, /local current = Feature\.findRolledCharacterByKey\(key\) or entry/);
-  assert.match(buyBody, /Feature\.teleportToPrompt\(current\.prompt, 3\.15\)/);
+  assert.match(buyBody, /Feature\.moveToPromptNaturally\(current\.prompt, Config\.roll\.promptDistance\)/);
+  assert.match(buyBody, /Feature\.holdPromptNaturally\(current\.prompt\)/);
   assert.match(buyBody, /if prompted and Feature\.waitForRolledCharacterGone\(key, tonumber\(Config\.delays\.buyConfirmTimeout\) or 2\.5\) then/);
   assert.doesNotMatch(buyBody, /Feature\.returnToRollStation\(\)/);
   assert.doesNotMatch(buyBody, /Feature\.moveNearInstance\(entry\.prompt, 3\.15\)/);
