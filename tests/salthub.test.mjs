@@ -1334,6 +1334,41 @@ test("auto merge includes duplicate target mutations instead of preserving every
   assert.doesNotMatch(getMergeCandidates, /Config\.roll\.targetMutations/);
 });
 
+test("auto merge excludes locked characters from scan, selection, and merge execution", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const scanUnits = source.match(/function State\.scanUnits\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const isMergeSelectableTarget = source.match(/function Feature\.isMergeSelectableTarget\(unit\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const getMergeCandidates = source.match(/function Feature\.getMergeCandidates\(selected\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const getMergeFamilyUnits = source.match(/function Feature\.getMergeFamilyUnits\(target\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const pickupAutoMergeBoardUnits = source.match(/function Feature\.pickupAutoMergeBoardUnits\(characterName\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const pickupUnitForMerge = source.match(/function Feature\.pickupUnitForMerge\(unit\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const placeUnitForMerge = source.match(/function Feature\.placeUnitForMerge\(unit, cell\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const mergeUnitsOnCell = source.match(/function Feature\.mergeUnitsOnCell\(anchor, fodder, cell\)([\s\S]*?)\nfunction Feature\.mergeFodderIntoPlacedAnchor/)?.[1] ?? "";
+  const mergeFodderIntoPlacedAnchor = source.match(/function Feature\.mergeFodderIntoPlacedAnchor\(anchor, fodder, cell\)([\s\S]*?)\nfunction Feature\.buildFodderForMergeLevel/)?.[1] ?? "";
+  const executeTargetMergeCascade = source.match(/function Feature\.executeTargetMergeCascade\(selected\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const executeMergePlan = source.match(/function Feature\.executeMergePlan\(plan\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /local UNIT_LOCK_DATA_SOURCES = \{ "LockedCharacters"/);
+  assert.match(source, /local function buildLockedUnitIdMap/);
+  assert.match(source, /local function readDataEntryLocked/);
+  assert.match(source, /local function readUnitLocked/);
+  assert.match(source, /function Feature\.isUnitLocked\(unit\)/);
+  assert.match(scanUnits, /local lockedUnitIds = buildLockedUnitIdMap\(\)/);
+  assert.match(scanUnits, /locked = readDataEntryLocked\(item, id, lockedUnitIds\)/);
+  assert.match(scanUnits, /locked = readUnitLocked\(child, lockedUnitIds\[id\] == true\)/);
+  assert.match(scanUnits, /locked = readUnitLocked\(model, \(existing and existing\.locked\) or lockedUnitIds\[id\] == true\)/);
+  assert.match(isMergeSelectableTarget, /Feature\.isUnitLocked\(unit\)/);
+  assert.match(getMergeCandidates, /not Feature\.isUnitLocked\(unit\)/);
+  assert.match(getMergeFamilyUnits, /not Feature\.isUnitLocked\(unit\)/);
+  assert.match(pickupAutoMergeBoardUnits, /not Feature\.isUnitLocked\(unit\)/);
+  assert.match(pickupUnitForMerge, /Feature\.isUnitLocked\(unit\)/);
+  assert.match(placeUnitForMerge, /Feature\.isUnitLocked\(unit\)/);
+  assert.match(mergeUnitsOnCell, /Feature\.isUnitLocked\(anchor\) or Feature\.isUnitLocked\(fodder\)/);
+  assert.match(mergeFodderIntoPlacedAnchor, /Feature\.isUnitLocked\(anchor\) or Feature\.isUnitLocked\(fodder\)/);
+  assert.match(executeTargetMergeCascade, /Feature\.isUnitLocked\(target\)/);
+  assert.match(executeMergePlan, /Feature\.isUnitLocked\(plan\.target\)/);
+});
+
 test("merge placement scans for a cell where the selected shape actually fits", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const findMergePlacementCell = source.match(/function Feature\.findMergePlacementCell\(unit, preferredCell\)([\s\S]*?)\nend/)?.[1] ?? "";

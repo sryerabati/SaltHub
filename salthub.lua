@@ -857,6 +857,8 @@ local State = {
     lastBestLineupSummary = "",
     bestLineupRunId = 0,
     bestLineupWaveBlockLogAt = 0,
+    lockedUnitIds = {},
+    lockedUnitIdsReady = false,
     configSaveQueued = false,
     configSaveReason = nil,
     lastConfigSaveAt = 0,
@@ -1393,6 +1395,72 @@ local function dataEntryValue(entry, names, fallback)
     return fallback
 end
 
+local UNIT_LOCK_VALUE_NAMES = { "Locked", "IsLocked", "Lock", "IsLock", "CharacterLocked", "UnitLocked", "Protected", "IsProtected" }
+local UNIT_LOCK_ID_NAMES = { "CharacterId", "CharacterID", "UID", "Uuid", "UUID", "Id", "ID" }
+local UNIT_LOCK_DATA_SOURCES = { "LockedCharacters", "LockedUnits", "CharacterLocks", "InventoryLocks", "ProtectedCharacters", "ProtectedUnits" }
+
+local function isTruthyLockValue(value)
+    if value == true then
+        return true
+    end
+    if value == false or value == nil then
+        return false
+    end
+    if type(value) == "number" then
+        return value ~= 0
+    end
+    if type(value) == "string" then
+        local clean = normalizeText(value)
+        return clean == "true" or clean == "1" or clean == "yes" or clean == "on" or clean == "locked"
+    end
+    return false
+end
+
+local function addLockedUnitId(lockedUnitIds, id)
+    local clean = tostring(id or "")
+    if clean ~= "" then
+        lockedUnitIds[clean] = true
+    end
+end
+
+local function readDataEntryLocked(entry, id, lockedUnitIds)
+    if lockedUnitIds and id ~= nil and lockedUnitIds[tostring(id)] == true then
+        return true
+    end
+    return isTruthyLockValue(dataEntryValue(entry, UNIT_LOCK_VALUE_NAMES, false))
+end
+
+local function addLockDataEntry(lockedUnitIds, key, entry)
+    if type(entry) == "table" then
+        local id = dataEntryValue(entry, UNIT_LOCK_ID_NAMES, key)
+        if readDataEntryLocked(entry, id, nil) then
+            addLockedUnitId(lockedUnitIds, id)
+        end
+    elseif isTruthyLockValue(entry) then
+        addLockedUnitId(lockedUnitIds, key)
+    end
+end
+
+local function buildLockedUnitIdMap()
+    local lockedUnitIds = {}
+    for _, sourceName in ipairs(UNIT_LOCK_DATA_SOURCES) do
+        local source = State.dataGet(sourceName, nil)
+        if type(source) == "table" then
+            for key, entry in pairs(source) do
+                addLockDataEntry(lockedUnitIds, key, entry)
+            end
+        end
+    end
+    return lockedUnitIds
+end
+
+local function readUnitLocked(instance, fallback)
+    if fallback == true then
+        return true
+    end
+    return isTruthyLockValue(readAttr(instance, UNIT_LOCK_VALUE_NAMES, nil))
+end
+
 local function traitForCharacter(traitMap, id, fallback)
     local trait = type(traitMap) == "table" and traitMap[tostring(id)] or nil
     if trait == nil or trait == "" then
@@ -1446,6 +1514,9 @@ function State.scanUnits()
     local byId = {}
     local traitMap = State.dataGet("Traits", {})
     local inventory = State.dataGet("Inventory", {})
+    local lockedUnitIds = buildLockedUnitIdMap()
+    State.lockedUnitIds = lockedUnitIds
+    State.lockedUnitIdsReady = true
 
     if type(inventory) == "table" then
         for _, item in pairs(inventory) do
@@ -1460,7 +1531,7 @@ function State.scanUnits()
                         level = tostring(dataEntryValue(item, { "Level", "Lvl" }, "?")),
                         mutation = normalizeUnitMutation(dataEntryValue(item, { "Mutation", "MutationName", "MutationType" }, "None")),
                         trait = traitForCharacter(traitMap, id, dataEntryValue(item, { "Trait", "TraitName", "Passive" }, "None")),
-                        locked = dataEntryValue(item, { "Locked", "IsLocked" }, false) == true,
+                        locked = readDataEntryLocked(item, id, lockedUnitIds),
                         equipped = dataEntryValue(item, { "Equipped", "Placed", "IsEquipped" }, false) == true,
                         crafting = dataEntryValue(item, { "Crafting", "IsCrafting" }, false) == true,
                         cloning = dataEntryValue(item, { "Cloning", "IsCloning" }, false) == true,
@@ -1489,7 +1560,7 @@ function State.scanUnits()
                         level = tostring(readAttr(child, { "Level", "Lvl" }, "?")),
                         mutation = readUnitMutation(child, "None"),
                         trait = traitForCharacter(traitMap, id, readAttr(child, { "Trait", "TraitName", "Passive" }, "None")),
-                        locked = readAttr(child, { "Locked", "IsLocked" }, false) == true,
+                        locked = readUnitLocked(child, lockedUnitIds[id] == true),
                     })
                 end
             end
@@ -1511,7 +1582,7 @@ function State.scanUnits()
                             level = tostring(readAttr(model, { "Level", "Lvl" }, "?")),
                             mutation = readUnitMutation(model, existing and existing.mutation or "None"),
                             trait = traitForCharacter(traitMap, id, readAttr(model, { "Trait", "TraitName", "Passive" }, existing and existing.trait or "None")),
-                            locked = readAttr(model, { "Locked", "IsLocked" }, false) == true,
+                            locked = readUnitLocked(model, (existing and existing.locked) or lockedUnitIds[id] == true),
                             equipped = true,
                             placed = true,
                         })
@@ -7487,11 +7558,41 @@ function Feature.traitScore(unit)
     return score
 end
 
+function Feature.isUnitLocked(unit)
+    if not unit then
+        return false
+    end
+    if unit.locked == true then
+        return true
+    end
+
+    local id = tostring(unit.id or "")
+    if id ~= "" then
+        local lockedUnitIds = State.lockedUnitIds
+        if type(lockedUnitIds) ~= "table" or State.lockedUnitIdsReady ~= true then
+            lockedUnitIds = buildLockedUnitIdMap()
+            State.lockedUnitIds = lockedUnitIds
+            State.lockedUnitIdsReady = true
+        end
+        if lockedUnitIds[id] == true then
+            unit.locked = true
+            return true
+        end
+    end
+
+    if unit.instance and readUnitLocked(unit.instance, false) then
+        unit.locked = true
+        return true
+    end
+
+    return false
+end
+
 function Feature.shouldKeepMergeUnit(unit)
     if not unit then
         return true
     end
-    if unit.locked then
+    if Feature.isUnitLocked(unit) then
         return true
     end
     if textMatchesAny(unit.name, Config.merge.blacklist) then
@@ -7554,6 +7655,9 @@ function Feature.isMergeSelectableTarget(unit)
     if not unit or tostring(unit.id or "") == "" then
         return false
     end
+    if Feature.isUnitLocked(unit) then
+        return false
+    end
     if tostring(unit.level or "") == "?" then
         return false
     end
@@ -7612,7 +7716,7 @@ function Feature.refreshMergeTarget(target)
         refreshed.level = tostring(readAttr(model, { "Level", "Lvl" }, refreshed.level or "?"))
         refreshed.mutation = readUnitMutation(model, refreshed.mutation or "None")
         refreshed.trait = tostring(readAttr(model, { "Trait", "TraitName", "Passive" }, refreshed.trait or "None"))
-        refreshed.locked = readAttr(model, { "Locked", "IsLocked" }, refreshed.locked) == true
+        refreshed.locked = readUnitLocked(model, refreshed.locked)
         return refreshed
     end
     State.scanUnits()
@@ -7738,6 +7842,10 @@ function Feature.equipUnitForMerge(unit)
 end
 
 function Feature.pickupUnitForMerge(unit)
+    if Feature.isUnitLocked(unit) then
+        Log.push("Merge skipped locked unit: " .. tostring(unit.name) .. ".")
+        return false
+    end
     local model = Feature.findPlacedUnitModel(unit)
     if not model then
         return true
@@ -7931,7 +8039,7 @@ function Feature.getMergeCandidates(selected)
             continue
         end
         if unit
-            and not unit.locked
+            and not Feature.isUnitLocked(unit)
             and not textMatchesAny(unit.name, Config.merge.blacklist)
             and Feature.unitMergeLevel(unit) < Feature.maxMergeLevel()
         then
@@ -7950,7 +8058,7 @@ function Feature.getMergeFamilyUnits(target)
     for _, unit in ipairs(State.characters) do
         if unit
             and Feature.sameMergeFamily(unit, target)
-            and not unit.locked
+            and not Feature.isUnitLocked(unit)
             and not textMatchesAny(unit.name, Config.merge.blacklist)
         then
             table.insert(family, unit)
@@ -8206,7 +8314,7 @@ function Feature.pickupAutoMergeBoardUnits(characterName)
         if unit
             and unit.placed == true
             and normalizeText(unit.name) == targetCharacter
-            and not unit.locked
+            and not Feature.isUnitLocked(unit)
             and not textMatchesAny(unit.name, Config.merge.blacklist)
             and Feature.getShapeFootprint(unit.name)
         then
@@ -8309,6 +8417,10 @@ end
 
 function Feature.placeUnitForMerge(unit, cell)
     if not unit or not cell then
+        return false
+    end
+    if Feature.isUnitLocked(unit) then
+        Log.push("Merge skipped locked unit: " .. tostring(unit.name) .. ".")
         return false
     end
     local placement = Feature.getMergePlacement(unit, cell)
@@ -8416,6 +8528,10 @@ function Feature.mergeUnitsOnCell(anchor, fodder, cell)
     if not anchor or not fodder or not cell then
         return nil
     end
+    if Feature.isUnitLocked(anchor) or Feature.isUnitLocked(fodder) then
+        Log.push("Merge stopped: locked unit is protected.")
+        return nil
+    end
 
     local anchorLevel = Feature.unitMergeLevel(anchor)
     if anchorLevel >= Feature.maxMergeLevel() then
@@ -8451,6 +8567,10 @@ end
 
 function Feature.mergeFodderIntoPlacedAnchor(anchor, fodder, cell)
     if not anchor or not fodder or not cell then
+        return nil
+    end
+    if Feature.isUnitLocked(anchor) or Feature.isUnitLocked(fodder) then
+        Log.push("Merge stopped: locked unit is protected.")
         return nil
     end
 
@@ -8524,6 +8644,10 @@ function Feature.executeTargetMergeCascade(selected)
         Log.push("Select a merge target first.")
         return false
     end
+    if Feature.isUnitLocked(target) then
+        Log.push("Selected merge target is locked.")
+        return false
+    end
     if tostring(target.level or "") == "?" then
         Log.push("Selected merge target needs a known level.")
         return false
@@ -8563,6 +8687,10 @@ function Feature.executeTargetMergeCascade(selected)
     local merged = 0
     for depth = 1, 12 do
         target = Feature.refreshMergeTarget(target)
+        if Feature.isUnitLocked(target) then
+            Log.push("Target merge stopped: selected target is locked.")
+            return merged > 0
+        end
         local targetLevel = Feature.unitMergeLevel(target)
         if targetLevel >= maxMergeLevel then
             Log.push("Target merge complete: level " .. tostring(targetLevel) .. " is max.")
@@ -8602,6 +8730,16 @@ end
 function Feature.executeMergePlan(plan)
     if not plan then
         return false
+    end
+    if Feature.isUnitLocked(plan.target) then
+        Log.push("Merge skipped: target is locked.")
+        return false
+    end
+    for _, unit in ipairs(plan.units or {}) do
+        if Feature.isUnitLocked(unit) then
+            Log.push("Merge skipped: group contains a locked unit.")
+            return false
+        end
     end
     Feature.pickupMergeGroup(plan.units)
     local placed = Feature.placeUnitForMerge(plan.target, plan.cell)
