@@ -110,6 +110,7 @@ local Config = {
         unitMutationTargets = {},
         snipeEvents = {},
         unitRules = {},
+        maxPodiumCharacters = 6,
         rollStationBehindDistance = 5.6,
         smoothMovement = true,
         promptDistance = 3.15,
@@ -4795,33 +4796,100 @@ function Feature.getRolledCharacterMutation(model)
     return "None"
 end
 
-function Feature.getRolledCharacters()
+function Feature.getRolledCharacterModelFromPrompt(prompt, folder)
+    local current = prompt
+    local best = nil
+    while current and current ~= folder do
+        if current:IsA("Model") then
+            local root = current:FindFirstChild("HumanoidRootPart") or current.PrimaryPart or current:FindFirstChildWhichIsA("BasePart", true)
+            if root then
+                best = current
+            end
+        end
+        current = current.Parent
+    end
+    return best
+end
+
+function Feature.getRolledCharacterModels()
     local plot = Feature.getOwnedPlot()
     local folder = plot and plot:FindFirstChild("Characters")
     local out = {}
     if not folder then
-        State.rolledCharacters = out
         return out
     end
 
-    for _, model in ipairs(folder:GetChildren()) do
-        if model:IsA("Model") then
-            local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-            local prompt = root and root:FindFirstChild("ProximityPrompt") or model:FindFirstChild("ProximityPrompt", true)
-            if prompt and prompt:IsA("ProximityPrompt") and normalizeText(prompt.ActionText):find("buy", 1, true) then
-                table.insert(out, {
-                    name = model.Name,
-                    mutation = Feature.getRolledCharacterMutation(model),
-                    characterId = tostring(model:GetAttribute("CharacterId") or ""),
-                    price = tostring(prompt.ObjectText or ""),
-                    model = model,
-                    root = root,
-                    prompt = prompt,
-                })
-            end
+    local maxCharacters = tonumber(Config.roll.maxPodiumCharacters) or 6
+    local seen = {}
+    local function addModel(model, prompt)
+        if #out >= (tonumber(Config.roll.maxPodiumCharacters) or 6) then
+            return
+        end
+        if not model or not model:IsA("Model") or seen[model] then
+            return
+        end
+        local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+        prompt = prompt or (root and root:FindFirstChild("ProximityPrompt")) or model:FindFirstChild("ProximityPrompt", true)
+        if prompt and prompt:IsA("ProximityPrompt") and normalizeText(prompt.ActionText):find("buy", 1, true) then
+            seen[model] = true
+            table.insert(out, {
+                model = model,
+                root = root,
+                prompt = prompt,
+            })
         end
     end
 
+    for _, model in ipairs(folder:GetChildren()) do
+        if #out >= maxCharacters then
+            break
+        end
+        if model:IsA("Model") then
+            addModel(model)
+        end
+    end
+
+    for _, descendant in ipairs(folder:GetDescendants()) do
+        if #out >= (tonumber(Config.roll.maxPodiumCharacters) or 6) then
+            break
+        end
+        if descendant:IsA("ProximityPrompt") and normalizeText(descendant.ActionText):find("buy", 1, true) then
+            addModel(Feature.getRolledCharacterModelFromPrompt(descendant, folder), descendant)
+        end
+    end
+
+    local root = Feature.getCharacterRoot()
+    table.sort(out, function(a, b)
+        local partA = a.root or Feature.getTargetPart(a.prompt)
+        local partB = b.root or Feature.getTargetPart(b.prompt)
+        local distanceA = root and partA and (root.Position - partA.Position).Magnitude or math.huge
+        local distanceB = root and partB and (root.Position - partB.Position).Magnitude or math.huge
+        if distanceA ~= distanceB then
+            return distanceA < distanceB
+        end
+        return tostring(a.model and a.model.Name or "") < tostring(b.model and b.model.Name or "")
+    end)
+    return out
+end
+
+function Feature.getRolledCharacters()
+    local out = {}
+    for _, rolled in ipairs(Feature.getRolledCharacterModels()) do
+        local model = rolled.model
+        local prompt = rolled.prompt
+        local root = rolled.root
+        local mutation = Feature.getRolledCharacterMutation(model)
+        table.insert(out, {
+            name = model.Name,
+            mutation = mutation,
+            characterId = tostring(model:GetAttribute("CharacterId") or ""),
+            slotKey = Feature.getRolledCharacterSlotKey(model, prompt, root, mutation),
+            price = tostring(prompt.ObjectText or ""),
+            model = model,
+            root = root,
+            prompt = prompt,
+        })
+    end
     State.rolledCharacters = out
     return out
 end
@@ -4897,12 +4965,36 @@ function Feature.getRolledCharacterPrice(entry)
     return Feature.parseCashText(entry.price or (entry.prompt and entry.prompt.ObjectText))
 end
 
+function Feature.getRolledCharacterSlotKey(model, prompt, root, mutation)
+    if model then
+        local ok, debugId = pcall(function()
+            return model:GetDebugId()
+        end)
+        if ok and debugId and tostring(debugId) ~= "" then
+            return tostring(debugId)
+        end
+    end
+
+    local targetPart = root or Feature.getTargetPart(prompt) or Feature.getTargetPart(model)
+    local positionKey = "unknown"
+    if targetPart then
+        local position = targetPart.Position
+        positionKey = string.format("%.1f,%.1f,%.1f", position.X, position.Y, position.Z)
+    elseif model then
+        positionKey = model:GetFullName()
+    end
+    return normalizedLookupKey(model and model.Name or "") .. "|" .. normalizedLookupKey(mutation or "None") .. "|" .. positionKey
+end
+
 function Feature.getRolledCharacterKey(entry)
     if not entry then
         return ""
     end
     if entry.characterId and entry.characterId ~= "" then
         return "id:" .. tostring(entry.characterId)
+    end
+    if entry.slotKey and entry.slotKey ~= "" then
+        return "slot:" .. tostring(entry.slotKey)
     end
     return normalizeText(tostring(entry.name) .. "|" .. tostring(entry.mutation))
 end
@@ -5488,7 +5580,7 @@ end
 function Feature.describeRolledCharacters()
     local lines = {}
     for index, entry in ipairs(Feature.getRolledCharacters()) do
-        if index > 3 then
+        if index > (tonumber(Config.roll.maxPodiumCharacters) or 6) then
             break
         end
         local marker = Feature.matchesRollTarget(entry) and "MATCH" or "scan"

@@ -849,6 +849,31 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.doesNotMatch(toggleBody, /Feature\.returnToRollStation\(\)/);
 });
 
+test("auto buy supports six podium roll results with unique slot keys", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const rolledModelsBody = source.match(/function Feature\.getRolledCharacterModels\(\)([\s\S]*?)\nfunction Feature\.getRolledCharacters/)?.[1] ?? "";
+  const rolledBody = source.match(/function Feature\.getRolledCharacters\(\)([\s\S]*?)\nfunction Feature\.matchesRollTarget/)?.[1] ?? "";
+  const slotKeyBody = source.match(/function Feature\.getRolledCharacterSlotKey\(model, prompt, root, mutation\)([\s\S]*?)\nfunction Feature\.getRolledCharacterKey/)?.[1] ?? "";
+  const keyBody = source.match(/function Feature\.getRolledCharacterKey\(entry\)([\s\S]*?)\nfunction Feature\.findRolledCharacterByKey/)?.[1] ?? "";
+  const describeBody = source.match(/function Feature\.describeRolledCharacters\(\)([\s\S]*?)\nfunction Feature\.toggleAutoRoll/)?.[1] ?? "";
+
+  assert.match(source, /maxPodiumCharacters = 6/);
+  assert.match(source, /function Feature\.getRolledCharacterModels/);
+  assert.match(rolledModelsBody, /plot:FindFirstChild\("Characters"\)/);
+  assert.match(rolledModelsBody, /folder:GetDescendants\(\)/);
+  assert.match(rolledModelsBody, /descendant:IsA\("ProximityPrompt"\)/);
+  assert.match(rolledModelsBody, /normalizeText\(descendant\.ActionText\):find\("buy", 1, true\)/);
+  assert.match(rolledModelsBody, /#out >= \(tonumber\(Config\.roll\.maxPodiumCharacters\) or 6\)/);
+  assert.match(rolledModelsBody, /table\.sort\(out, function\(a, b\)/);
+  assert.match(rolledBody, /for _, rolled in ipairs\(Feature\.getRolledCharacterModels\(\)\) do/);
+  assert.match(rolledBody, /slotKey = Feature\.getRolledCharacterSlotKey\(model, prompt, root, mutation\)/);
+  assert.match(source, /function Feature\.getRolledCharacterSlotKey/);
+  assert.match(slotKeyBody, /pcall\(function\(\)\s+return model:GetDebugId\(\)/);
+  assert.match(slotKeyBody, /string\.format\("%.1f,%.1f,%.1f"/);
+  assert.match(keyBody, /if entry\.slotKey and entry\.slotKey ~= "" then[\s\S]*?return "slot:" \.\. tostring\(entry\.slotKey\)/);
+  assert.match(describeBody, /if index > \(tonumber\(Config\.roll\.maxPodiumCharacters\) or 6\) then/);
+});
+
 test("one-time buttons are removed from primary pages", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
