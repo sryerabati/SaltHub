@@ -94,6 +94,7 @@ local Config = {
         autoUpgrade = false,
         autoBestLineup = false,
         autoBuhara = false,
+        autoBoorus = false,
         autoBattlepass = false,
         autoVipRewards = false,
         optimizeNativeMenus = true,
@@ -211,6 +212,14 @@ local Config = {
         holdPoll = 4.0,
         holdLogInterval = 8.0,
         maxScanItems = 450,
+    },
+    boorus = {
+        promptDistance = 3.0,
+        startCooldown = 6.0,
+        spinBusyTime = 6.8,
+        spinCompleteDelay = 0.65,
+        fightSupportWindow = 600,
+        fightSupportPoll = 2.0,
     },
 }
 
@@ -691,6 +700,7 @@ local Remote = {
         FragmentFusionRequest = { "ReplicatedStorage", "Remotes", "FragmentFusion", "Request" },
         PlaceCharacter = { "ReplicatedStorage", "Remotes", "Characters", "PlaceCharacter" },
         SpinWheel = { "ReplicatedStorage", "Remotes", "SpinWheel", "Spin" },
+        BeerusSpin = { "ReplicatedStorage", "Remotes", "SpinWheel", "BeerusSpin" },
         EventUI = { "ReplicatedStorage", "Remotes", "Events", "EventUI" },
         FragmentRainCollect = { "ReplicatedStorage", "Remotes", "FragmentRain", "Collect" },
         BuharaData = { "ReplicatedStorage", "Remotes", "BuharaEvent", "BuharaEventGetData" },
@@ -824,6 +834,11 @@ local State = {
     lastNativeMenuPauseLogAt = 0,
     spinStatus = "Waiting for data.",
     spinBusyUntil = 0,
+    boorusStatus = "Waiting for data.",
+    boorusSpinBusyUntil = 0,
+    boorusSpinCompleteAttached = false,
+    lastBoorusChallengeStartAt = 0,
+    boorusFightUntil = 0,
     battlepassStatus = "Waiting for data.",
     vipRewardStatus = "Waiting for data.",
     waveStatus = "-",
@@ -5512,6 +5527,9 @@ function Feature.startLoadedAutomationSettings()
     if Config.flags.autoBuhara then
         Feature.toggleBuhara(true)
     end
+    if Config.flags.autoBoorus then
+        Feature.toggleBoorus(true)
+    end
     if Config.flags.autoBattlepass then
         Feature.toggleBattlepass(true)
     end
@@ -8938,6 +8956,185 @@ function Feature.toggleUpgrade(value)
     end
 end
 
+function Feature.getBoorusSpinCount()
+    local count = tonumber(Feature.dataGet("BeerusSpin", 0)) or 0
+    return math.max(0, math.floor(count))
+end
+
+function Feature.getBoorusChallengeDoor()
+    local machines = workspace:FindFirstChild("Machines")
+    local door = machines and machines:FindFirstChild("Door")
+    if door then
+        return door
+    end
+    return machines and machines:FindFirstChild("BeerusDoor", true) or nil
+end
+
+function Feature.getBoorusChallengePrompt()
+    local door = Feature.getBoorusChallengeDoor()
+    local prompt = door and door:FindFirstChild("Door") and door.Door:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt and prompt:IsA("ProximityPrompt") and textMatchesAny(prompt.ActionText, { "Challenge Boss" }) then
+        return prompt
+    end
+    if door then
+        for _, descendant in ipairs(door:GetDescendants()) do
+            if descendant:IsA("ProximityPrompt") and textMatchesAny(descendant.ActionText, { "Challenge Boss", "Boss" }) then
+                return descendant
+            end
+        end
+    end
+    return nil
+end
+
+function Feature.getBoorusChallengeText()
+    local door = Feature.getBoorusChallengeDoor()
+    local gui = door and door:FindFirstChild("RestockGUI")
+    local timer = gui and gui:FindFirstChild("TimerLabel")
+    if timer and timer:IsA("TextLabel") then
+        return tostring(timer.Text or "")
+    end
+    return ""
+end
+
+function Feature.isBoorusChallengeReady()
+    local lastChallenge = tonumber(Feature.dataGet("LastBeerusBossChallenge", 0)) or 0
+    local today = os.time() // 86400
+    if lastChallenge < today then
+        return true
+    end
+
+    local statusText = normalizeText(Feature.getBoorusChallengeText())
+    return lastChallenge <= 0 and statusText:find("challenge now", 1, true) ~= nil
+end
+
+function Feature.startBoorusChallengeIfReady()
+    if not Feature.isBoorusChallengeReady() then
+        local statusText = Feature.getBoorusChallengeText()
+        State.boorusStatus = statusText ~= "" and statusText or "Boorus challenge is not ready yet."
+        return false
+    end
+
+    local prompt = Feature.getBoorusChallengePrompt()
+    if not prompt or not prompt.Enabled then
+        State.boorusStatus = "Boorus challenge prompt was not found."
+        return false
+    end
+
+    local now = os.clock()
+    if now - (State.lastBoorusChallengeStartAt or 0) < math.max(tonumber(Config.boorus.startCooldown) or 6, 1) then
+        return false
+    end
+
+    State.lastBoorusChallengeStartAt = now
+    Feature.moveNearInstance(prompt, Config.boorus.promptDistance)
+    local ok = Feature.holdPrompt(prompt)
+    if ok then
+        State.boorusFightUntil = os.clock() + math.max(tonumber(Config.boorus.fightSupportWindow) or 600, 60)
+        State.boorusStatus = "Boorus challenge started."
+        Log.push(State.boorusStatus)
+        task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.2))
+    else
+        State.boorusStatus = "Boorus challenge prompt failed."
+    end
+    return ok
+end
+
+function Feature.attachBoorusSpinComplete()
+    if State.boorusSpinCompleteAttached then
+        return true
+    end
+
+    local remote = Remote.get("BeerusSpin")
+    if not remote or not remote:IsA("RemoteEvent") then
+        State.boorusStatus = "Missing RemoteEvent: BeerusSpin"
+        return false
+    end
+
+    State.boorusSpinCompleteAttached = true
+    Maid:add(remote.OnClientEvent:Connect(function(payload)
+        if type(payload) == "table" and payload.Action == "Result" then
+            task.delay(math.max(tonumber(Config.boorus.spinCompleteDelay) or 0.65, 0.35), function()
+                Remote.fire("BeerusSpin", "Complete", { NotifyText = payload.NotifyText })
+                State.boorusStatus = "Boorus spin reward collected."
+                Log.push(State.boorusStatus)
+            end)
+        end
+    end))
+    return true
+end
+
+function Feature.boorusSpinOnce()
+    local now = os.clock()
+    if now < (tonumber(State.boorusSpinBusyUntil) or 0) then
+        return false
+    end
+
+    local spins = Feature.getBoorusSpinCount()
+    if spins <= 0 then
+        State.boorusStatus = "Boorus: 0 spins available."
+        return false
+    end
+
+    if not Feature.attachBoorusSpinComplete() then
+        return false
+    end
+
+    local ok = Remote.fire("BeerusSpin", "Spin")
+    if ok then
+        State.boorusSpinBusyUntil = now + math.max(tonumber(Config.boorus.spinBusyTime) or 6.8, 1)
+        State.boorusStatus = "Boorus spin sent (" .. tostring(spins) .. " before spin)."
+        Log.push(State.boorusStatus)
+    end
+    return ok
+end
+
+function Feature.runBoorusFightSupport()
+    if os.clock() > (tonumber(State.boorusFightUntil) or 0) then
+        return false
+    end
+
+    if not Feature.isWaveStarted() then
+        Feature.autoStartWaveStep()
+    end
+    if Config.flags.autoFastForward or Config.boorus.autoFastForward ~= false then
+        Remote.fire("FastForward", Config.wave.fastForward)
+    end
+    return true
+end
+
+function Feature.autoBoorusStep()
+    if Feature.boorusSpinOnce() then
+        return true
+    end
+    if Feature.runBoorusFightSupport() then
+        return true
+    end
+    if Feature.startBoorusChallengeIfReady() then
+        Feature.runBoorusFightSupport()
+        return true
+    end
+    return false
+end
+
+function Feature.toggleBoorus(value)
+    Config.flags.autoBoorus = value
+    if value then
+        Feature.attachBoorusSpinComplete()
+        Feature.startLoop("autoBoorus", function()
+            if os.clock() < (tonumber(State.boorusSpinBusyUntil) or 0) then
+                return math.max((tonumber(State.boorusSpinBusyUntil) or 0) - os.clock(), tonumber(Config.delays.event) or 1)
+            end
+            if os.clock() <= (tonumber(State.boorusFightUntil) or 0) then
+                return math.max(tonumber(Config.boorus.fightSupportPoll) or 2, tonumber(Config.delays.event) or 1)
+            end
+            return Config.delays.event
+        end, Feature.autoBoorusStep)
+    else
+        Feature.stopLoop("autoBoorus")
+        State.boorusFightUntil = 0
+    end
+end
+
 function Feature.getBuharaData()
     local data = Remote.invoke("BuharaData")
     if type(data) == "table" then
@@ -9916,6 +10113,11 @@ local Tabs = {
             UI.toggle(buhara, "Auto Buhara Collect and Feed", function()
                 return Config.flags.autoBuhara
             end, Feature.toggleBuhara)
+
+            local boorus = UI.section(page, "Boorus Event")
+            UI.toggle(boorus, "Auto Boorus", function()
+                return Config.flags.autoBoorus
+            end, Feature.toggleBoorus)
 
             local spin = UI.section(page, "Spin Wheel")
             UI.toggle(spin, "Auto Spin Wheel", function()

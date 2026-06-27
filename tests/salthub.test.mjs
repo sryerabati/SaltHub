@@ -207,6 +207,7 @@ test("saved automation switches start their actions on load", () => {
     ["autoTrait", "Feature.toggleTrait(true)"],
     ["autoUpgrade", "Feature.toggleUpgrade(true)"],
     ["autoBuhara", "Feature.toggleBuhara(true)"],
+    ["autoBoorus", "Feature.toggleBoorus(true)"],
     ["autoBattlepass", "Feature.toggleBattlepass(true)"],
     ["autoSpin", "Feature.setAutoSpin(true)"],
     ["autoVipRewards", "Feature.toggleVipRewards(true)"],
@@ -251,6 +252,43 @@ test("auto VIP rewards sync and claim through the ClaimVIP remote", () => {
   assert.match(toggleBody, /Feature\.startLoop\("autoVipRewards"/);
   assert.match(source, /UI\.toggle\(misc, "Auto VIP Rewards"[\s\S]*?Feature\.toggleVipRewards/);
   assert.match(startupBody, /if Config\.flags\.autoVipRewards then\s+Feature\.toggleVipRewards\(true\)/);
+});
+
+test("auto Boorus starts the daily boss challenge and completes Beerus wheel spins", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const readyBody = source.match(/function Feature\.isBoorusChallengeReady\(\)([\s\S]*?)\nfunction Feature\.startBoorusChallengeIfReady/)?.[1] ?? "";
+  const startBody = source.match(/function Feature\.startBoorusChallengeIfReady\(\)([\s\S]*?)\nfunction Feature\.attachBoorusSpinComplete/)?.[1] ?? "";
+  const spinBody = source.match(/function Feature\.boorusSpinOnce\(\)([\s\S]*?)\nfunction Feature\.runBoorusFightSupport/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoBoorusStep\(\)([\s\S]*?)\nfunction Feature\.toggleBoorus/)?.[1] ?? "";
+  const toggleBody = source.match(/function Feature\.toggleBoorus\(value\)([\s\S]*?)\nfunction Feature\.getBuharaData/)?.[1] ?? "";
+
+  assert.match(source, /autoBoorus = false/);
+  assert.match(source, /boorus = \{/);
+  assert.match(source, /boorusStatus = "Waiting for data\."/);
+  assert.match(source, /BeerusSpin = \{ "ReplicatedStorage", "Remotes", "SpinWheel", "BeerusSpin" \}/);
+  assert.match(source, /function Feature\.getBoorusSpinCount/);
+  assert.match(source, /function Feature\.getBoorusChallengePrompt/);
+  assert.match(source, /function Feature\.isBoorusChallengeReady/);
+  assert.match(source, /function Feature\.startBoorusChallengeIfReady/);
+  assert.match(source, /function Feature\.attachBoorusSpinComplete/);
+  assert.match(source, /function Feature\.boorusSpinOnce/);
+  assert.match(source, /function Feature\.autoBoorusStep/);
+  assert.match(source, /function Feature\.toggleBoorus/);
+  assert.match(readyBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
+  assert.match(readyBody, /os\.time\(\) \/\/ 86400/);
+  assert.match(startBody, /Feature\.moveNearInstance\(prompt, Config\.boorus\.promptDistance\)/);
+  assert.match(startBody, /Feature\.holdPrompt\(prompt\)/);
+  assert.match(spinBody, /Feature\.getBoorusSpinCount\(\)/);
+  assert.match(spinBody, /Feature\.attachBoorusSpinComplete\(\)/);
+  assert.match(spinBody, /Remote\.fire\("BeerusSpin", "Spin"\)/);
+  assert.match(source, /Remote\.fire\("BeerusSpin", "Complete", \{ NotifyText = payload\.NotifyText \}\)/);
+  assert.match(stepBody, /Feature\.boorusSpinOnce\(\)/);
+  assert.match(stepBody, /Feature\.startBoorusChallengeIfReady\(\)/);
+  assert.match(stepBody, /Feature\.runBoorusFightSupport\(\)/);
+  assert.match(toggleBody, /Feature\.startLoop\("autoBoorus"/);
+  assert.match(source, /UI\.toggle\(boorus, "Auto Boorus"[\s\S]*?Feature\.toggleBoorus/);
+  assert.match(startupBody, /if Config\.flags\.autoBoorus then\s+Feature\.toggleBoorus\(true\)/);
 });
 
 test("anti afk is enabled by default and user-toggleable in settings", () => {
