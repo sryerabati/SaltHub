@@ -115,6 +115,7 @@ test("snipe events use real event enums and clean labels", () => {
   assert.match(source, /function DataSource\.cleanSnipeEventNames/);
   assert.match(source, /not DataSource\.blockedSnipeEventNames\[normalizeText\(item\)\]/);
   assert.match(source, /"Dragonborn"/);
+  assert.match(source, /"SuperShenron"/);
   assert.match(source, /\[normalizeText\("Buhara"\)\] = true/);
   assert.match(source, /snipeEvents = mutationEventNames/);
   assert.doesNotMatch(source, /DataSource\.extractEventNames\("specialEventName"/);
@@ -129,7 +130,7 @@ test("nen sniping ignores buhara setup event", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /function Feature\.getSelectedSnipeEvents/);
-  assert.match(source, /DataSource\.cleanSnipeEventNames\(Config\.roll\.snipeEvents\)/);
+  assert.match(source, /DataSource\.expandSnipeEventNames\(Config\.roll\.snipeEvents\)/);
   assert.match(source, /function Feature\.isSelectedEventPayloadText/);
   assert.match(source, /function Feature\.isActiveEventTextForSelection/);
   assert.match(source, /clean:find\("next event", 1, true\)/);
@@ -143,6 +144,19 @@ test("nen sniping ignores buhara setup event", () => {
   assert.match(source, /Feature\.isActiveEventTextForSelection\(State\.activeEventText\)/);
   assert.match(source, /textMatchesAny\(State\.waveStatus, selectedEvents\)/);
   assert.doesNotMatch(source, /"Buhara",\s*\n\s*"Titan"/);
+});
+
+test("super shenron event sniping supports display aliases for holding", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /DataSource\.snipeEventAliases/);
+  assert.match(source, /\[normalizeText\("SuperShenron"\)\] = \{ "Super Shenron", "Shenron" \}/);
+  assert.match(source, /function DataSource\.expandSnipeEventNames/);
+  assert.match(source, /DataSource\.expandSnipeEventNames\(Config\.roll\.snipeEvents\)/);
+  assert.match(source, /Feature\.isSelectedEventPayloadText\(text, selectedEvents\)/);
+  assert.match(source, /clean:find\(eventClean \.\. " mutation event", 1, true\)/);
+  assert.match(source, /textMatchesAny\(State\.activeEventText, selectedEvents\)/);
+  assert.doesNotMatch(source, /DataSource\.extractEventNames\("specialEventName"/);
 });
 
 test("snipe hold waits only on secret pity and throttles expensive event scans", () => {

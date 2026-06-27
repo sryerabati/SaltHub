@@ -1184,11 +1184,29 @@ DataSource.blockedSnipeEventNames = {
     [normalizeText("Roll")] = true,
 }
 
+DataSource.snipeEventAliases = {
+    [normalizeText("SuperShenron")] = { "Super Shenron", "Shenron" },
+    [normalizeText("Super Shenron")] = { "SuperShenron", "Shenron" },
+}
+
 function DataSource.cleanSnipeEventNames(list)
     local out = {}
     for _, item in ipairs(list or {}) do
         if type(item) == "string" and item ~= "" and not DataSource.blockedSnipeEventNames[normalizeText(item)] then
             table.insert(out, item)
+        end
+    end
+    return uniqueSorted(out)
+end
+
+function DataSource.expandSnipeEventNames(list)
+    local out = {}
+    for _, item in ipairs(DataSource.cleanSnipeEventNames(list)) do
+        table.insert(out, item)
+        for _, alias in ipairs(DataSource.snipeEventAliases[normalizeText(item)] or {}) do
+            if not DataSource.blockedSnipeEventNames[normalizeText(alias)] then
+                table.insert(out, alias)
+            end
         end
     end
     return uniqueSorted(out)
@@ -1241,6 +1259,7 @@ function DataSource.load()
         "Nen",
         "Titan",
         "Quincy",
+        "SuperShenron",
     })
     mutationEventNames = DataSource.cleanSnipeEventNames(mutationEventNames)
 
@@ -5134,11 +5153,11 @@ function Feature.isEventStatusText(text)
         or clean:match("^x%d+") then
         return true
     end
-    return clean:find("event", 1, true) ~= nil and textMatchesAny(clean, Config.roll.snipeEvents)
+    return clean:find("event", 1, true) ~= nil and textMatchesAny(clean, DataSource.expandSnipeEventNames(Config.roll.snipeEvents))
 end
 
 function Feature.getSelectedSnipeEvents()
-    return DataSource.cleanSnipeEventNames(Config.roll.snipeEvents)
+    return DataSource.expandSnipeEventNames(Config.roll.snipeEvents)
 end
 
 function Feature.isSelectedEventPayloadText(text, selectedEvents)
