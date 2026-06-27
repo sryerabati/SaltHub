@@ -94,6 +94,7 @@ local Config = {
         autoUpgrade = false,
         autoBestLineup = false,
         autoBuhara = false,
+        autoShenron = false,
         autoBoorus = false,
         autoBattlepass = false,
         autoVipRewards = false,
@@ -212,6 +213,17 @@ local Config = {
         holdPoll = 4.0,
         holdLogInterval = 8.0,
         maxScanItems = 450,
+    },
+    shenron = {
+        ballCollectDistance = 1.1,
+        turnInDistance = 1.2,
+        collectRetries = 3,
+        turnInRetries = 3,
+        scanInterval = 0.65,
+        holdPoll = 4.0,
+        holdLogInterval = 8.0,
+        maxScanItems = 650,
+        claimCooldown = 3.0,
     },
     boorus = {
         promptDistance = 3.0,
@@ -706,6 +718,7 @@ local Remote = {
         BuharaData = { "ReplicatedStorage", "Remotes", "BuharaEvent", "BuharaEventGetData" },
         BuharaDropFood = { "ReplicatedStorage", "Remotes", "BuharaEvent", "DropFood" },
         BuharaMessage = { "ReplicatedStorage", "Remotes", "BuharaEvent", "CreateBuharaMessage" },
+        SuperShenronClaimWish = { "ReplicatedStorage", "Remotes", "SuperShenronEvent", "ClaimWish" },
         CharacterLock = { "ReplicatedStorage", "Remotes", "Characters", "UpdateCharacterLock" },
         PickupCharacter = { "ReplicatedStorage", "Remotes", "Characters", "PickupCharacter" },
         MoveCharacter = { "ReplicatedStorage", "Remotes", "Characters", "MoveCharacter" },
@@ -839,6 +852,15 @@ local State = {
     boorusSpinCompleteAttached = false,
     lastBoorusChallengeStartAt = 0,
     boorusFightUntil = 0,
+    shenronStatus = "Waiting for data.",
+    shenronDragonBalls = {},
+    shenronDragonBallScanAt = 0,
+    shenronTurnInTarget = nil,
+    shenronTurnInTargetScanAt = 0,
+    shenronCollectedSinceTurnIn = 0,
+    shenronHoldUntil = 0,
+    lastShenronHoldLogAt = 0,
+    lastShenronClaimAt = 0,
     battlepassStatus = "Waiting for data.",
     vipRewardStatus = "Waiting for data.",
     waveStatus = "-",
@@ -4622,6 +4644,27 @@ function Feature.teleportToCFrame(targetCFrame)
     return ok
 end
 
+function Feature.touchInstance(instance)
+    local root = Feature.getCharacterRoot()
+    local targetPart = Feature.getTargetPart(instance)
+    if not root or not targetPart then
+        return false
+    end
+
+    if type(firetouchinterest) == "function" then
+        local ok = pcall(function()
+            firetouchinterest(root, targetPart, 0)
+            task.wait(0.04)
+            firetouchinterest(root, targetPart, 1)
+        end)
+        if ok then
+            return true
+        end
+    end
+
+    return (root.Position - targetPart.Position).Magnitude <= math.max(targetPart.Size.Magnitude, 4)
+end
+
 function Feature.holdKey(keyCode, duration)
     local key = keyCode or Enum.KeyCode.E
     local seconds = math.max(tonumber(duration) or 0.15, 0.15)
@@ -5549,6 +5592,9 @@ function Feature.startLoadedAutomationSettings()
     end
     if Config.flags.autoBuhara then
         Feature.toggleBuhara(true)
+    end
+    if Config.flags.autoShenron then
+        Feature.toggleShenron(true)
     end
     if Config.flags.autoBoorus then
         Feature.toggleBoorus(true)
@@ -9710,6 +9756,285 @@ function Feature.toggleBuhara(value)
     end
 end
 
+function Feature.getShenronScanRoots()
+    local roots = {}
+    local seen = {}
+    local function add(instance)
+        if instance and not seen[instance] then
+            seen[instance] = true
+            table.insert(roots, instance)
+        end
+    end
+
+    add(workspace:FindFirstChild("EventAttachments"))
+    add(workspace:FindFirstChild("MutationStuffs"))
+    add(workspace:FindFirstChild("Debris"))
+    add(workspace:FindFirstChild("Map"))
+    for _, child in ipairs(workspace:GetChildren()) do
+        if textMatchesAny(child.Name, { "DragonBall", "Dragon Ball", "Shenron", "SuperShenron", "Event" }) then
+            add(child)
+        end
+    end
+    return roots
+end
+
+function Feature.getShenronDragonBallName(instance)
+    if not instance then
+        return nil
+    end
+
+    local function parse(value)
+        local text = tostring(value or "")
+        local direct = text:match("DragonBall%d")
+        if direct then
+            return direct
+        end
+        local number = normalizeText(text):match("dragon%s*ball%s*(%d)")
+        if number then
+            return "DragonBall" .. tostring(number)
+        end
+        return nil
+    end
+
+    for _, attrName in ipairs({ "DragonBallName", "BallName", "ItemName", "DisplayName" }) do
+        local ballName = parse(instance:GetAttribute(attrName))
+        if ballName then
+            return ballName
+        end
+    end
+
+    local current = instance
+    while current and current ~= workspace do
+        local ballName = parse(current.Name)
+        if ballName then
+            return ballName
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+function Feature.refreshShenronDragonBallCache()
+    local root = Feature.getCharacterRoot()
+    local balls = {}
+    local seen = {}
+    local scanned = 0
+
+    for _, scanRoot in ipairs(Feature.getShenronScanRoots()) do
+        local scanItems = { scanRoot }
+        for _, descendant in ipairs(scanRoot:GetDescendants()) do
+            table.insert(scanItems, descendant)
+        end
+
+        for _, instance in ipairs(scanItems) do
+            scanned += 1
+            if scanned > (tonumber(Config.shenron.maxScanItems) or 650) then
+                break
+            end
+
+            if instance:IsA("BasePart") or instance:IsA("Model") or instance:IsA("Tool") then
+                local ballName = Feature.getShenronDragonBallName(instance)
+                if not ballName then
+                    ballName = tostring(instance.Name or ""):match("DragonBall%d")
+                end
+                local targetPart = ballName and Feature.getTargetPart(instance) or nil
+                if ballName and targetPart and targetPart:IsDescendantOf(workspace) and not seen[targetPart] then
+                    seen[targetPart] = true
+                    table.insert(balls, {
+                        name = ballName,
+                        instance = instance,
+                        part = targetPart,
+                        distance = root and (root.Position - targetPart.Position).Magnitude or 0,
+                    })
+                end
+            end
+        end
+        if scanned > (tonumber(Config.shenron.maxScanItems) or 650) then
+            break
+        end
+    end
+
+    table.sort(balls, function(a, b)
+        return (a.distance or 0) < (b.distance or 0)
+    end)
+    State.shenronDragonBalls = balls
+    State.shenronDragonBallScanAt = os.clock()
+    return balls
+end
+
+function Feature.getShenronDragonBalls()
+    if os.clock() - (State.shenronDragonBallScanAt or 0) < (tonumber(Config.shenron.scanInterval) or 0.65) then
+        return State.shenronDragonBalls or {}
+    end
+    return Feature.refreshShenronDragonBallCache()
+end
+
+function Feature.detectCarriedShenronDragonBall()
+    local character = LocalPlayer.Character
+    if not character then
+        return false
+    end
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("Tool") or descendant:IsA("Model") or descendant:IsA("BasePart") then
+            if Feature.getShenronDragonBallName(descendant) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function Feature.collectShenronDragonBall(ball)
+    if not ball or not ball.instance then
+        return false
+    end
+
+    for attempt = 1, math.max(tonumber(Config.shenron.collectRetries) or 1, 1) do
+        Feature.teleportToBuharaObject(ball.instance, Config.shenron.ballCollectDistance)
+        task.wait(0.06)
+        Feature.touchInstance(ball.instance)
+        task.wait(0.18)
+        if Feature.detectCarriedShenronDragonBall() or not ball.part or not ball.part:IsDescendantOf(workspace) then
+            State.shenronCollectedSinceTurnIn = (tonumber(State.shenronCollectedSinceTurnIn) or 0) + 1
+            State.shenronDragonBallScanAt = 0
+            State.shenronStatus = "Collected " .. tostring(ball.name) .. "."
+            return true
+        end
+    end
+    return Feature.detectCarriedShenronDragonBall()
+end
+
+function Feature.getShenronTurnInTarget()
+    if State.shenronTurnInTarget
+        and State.shenronTurnInTarget.Parent
+        and os.clock() - (State.shenronTurnInTargetScanAt or 0) < (tonumber(Config.shenron.scanInterval) or 0.65) then
+        return State.shenronTurnInTarget
+    end
+
+    local attachments = workspace:FindFirstChild("EventAttachments")
+    local spawn = attachments and attachments:FindFirstChild("ShenronSpawn")
+    local balls = spawn and spawn:FindFirstChild("Balls")
+    local transform = balls and balls:FindFirstChild("Transform")
+    if transform and transform:IsA("BasePart") then
+        State.shenronTurnInTarget = transform
+        State.shenronTurnInTargetScanAt = os.clock()
+        return transform
+    end
+
+    if attachments then
+        for _, instance in ipairs(attachments:GetDescendants()) do
+            if instance:IsA("BasePart") and textMatchesAny(instance:GetFullName(), { "ShenronSpawn", "Balls", "Transform" }) then
+                State.shenronTurnInTarget = instance
+                State.shenronTurnInTargetScanAt = os.clock()
+                return instance
+            end
+        end
+    end
+
+    State.shenronTurnInTarget = nil
+    State.shenronTurnInTargetScanAt = os.clock()
+    return nil
+end
+
+function Feature.setShenronHoldBackoff(message)
+    local now = os.clock()
+    State.shenronHoldUntil = now + math.max(tonumber(Config.shenron.holdPoll) or 4, 1)
+    local logInterval = math.max(tonumber(Config.shenron.holdLogInterval) or 8, 1)
+    if State.lastShenronHoldLogAt == 0 or now - (State.lastShenronHoldLogAt or 0) >= logInterval then
+        State.lastShenronHoldLogAt = now
+        Log.push(message)
+    end
+end
+
+function Feature.clearShenronHoldBackoff()
+    State.shenronHoldUntil = 0
+end
+
+function Feature.shouldPauseShenronForAutoMerge()
+    return Config.flags.autoMerge == true
+end
+
+function Feature.turnInShenronDragonBalls()
+    local target = Feature.getShenronTurnInTarget()
+    if not target then
+        Feature.setShenronHoldBackoff("Shenron turn-in target is not visible yet.")
+        State.shenronStatus = "Waiting for Shenron turn-in target."
+        return false
+    end
+
+    local now = os.clock()
+    if now - (State.lastShenronClaimAt or 0) < math.max(tonumber(Config.shenron.claimCooldown) or 3, 1) then
+        return false
+    end
+
+    Feature.clearShenronHoldBackoff()
+    for attempt = 1, math.max(tonumber(Config.shenron.turnInRetries) or 1, 1) do
+        Feature.teleportToBuharaObject(target, Config.shenron.turnInDistance)
+        task.wait(0.06)
+        Feature.touchInstance(target)
+        task.wait(0.12)
+    end
+
+    State.lastShenronClaimAt = os.clock()
+    local ok = Remote.fire("SuperShenronClaimWish")
+    if ok then
+        State.shenronCollectedSinceTurnIn = 0
+        State.shenronStatus = "Shenron wish claimed."
+        Log.push(State.shenronStatus)
+    else
+        State.shenronStatus = "Shenron wish claim remote was not available."
+    end
+    return ok
+end
+
+function Feature.getAutoShenronLoopDelay()
+    if Feature.shouldPauseShenronForAutoMerge() then
+        return math.max(tonumber(Config.delays.mergeIdle) or 2.5, tonumber(Config.delays.event) or 1)
+    end
+
+    local now = os.clock()
+    local holdUntil = tonumber(State.shenronHoldUntil) or 0
+    if holdUntil > now then
+        return math.max(holdUntil - now, tonumber(Config.delays.event) or 1)
+    end
+    return tonumber(Config.delays.event) or 1
+end
+
+function Feature.autoShenronStep()
+    if Feature.shouldPauseShenronForAutoMerge() then
+        return false
+    end
+
+    if Feature.detectCarriedShenronDragonBall() then
+        return Feature.turnInShenronDragonBalls()
+    end
+
+    local balls = Feature.getShenronDragonBalls()
+    if #balls > 0 then
+        Feature.clearShenronHoldBackoff()
+        return Feature.collectShenronDragonBall(balls[1])
+    end
+
+    if (tonumber(State.shenronCollectedSinceTurnIn) or 0) > 0 then
+        return Feature.turnInShenronDragonBalls()
+    end
+
+    State.shenronStatus = "Waiting for dragon balls."
+    return false
+end
+
+function Feature.toggleShenron(value)
+    Config.flags.autoShenron = value
+    if value then
+        Feature.clearShenronHoldBackoff()
+        Feature.startLoop("autoShenron", Feature.getAutoShenronLoopDelay, Feature.autoShenronStep)
+    else
+        Feature.stopLoop("autoShenron")
+        Feature.clearShenronHoldBackoff()
+    end
+end
+
 function Feature.getBattlepassRewardModule()
     if Feature.battlepassReward then
         return Feature.battlepassReward
@@ -10148,6 +10473,11 @@ local Tabs = {
             UI.toggle(buhara, "Auto Buhara Collect and Feed", function()
                 return Config.flags.autoBuhara
             end, Feature.toggleBuhara)
+
+            local shenron = UI.section(page, "Shenron Event")
+            UI.toggle(shenron, "Auto Shenron Collect and Wish", function()
+                return Config.flags.autoShenron
+            end, Feature.toggleShenron)
 
             local boorus = UI.section(page, "Boorus Event")
             UI.toggle(boorus, "Auto Boorus", function()

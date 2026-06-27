@@ -311,6 +311,44 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(startupBody, /if Config\.flags\.autoBoorus then\s+Feature\.toggleBoorus\(true\)/);
 });
 
+test("auto Shenron collects dragon balls and claims the wish", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.refreshShenronDragonBallCache/)?.[1] ?? "";
+  const refreshBody = source.match(/function Feature\.refreshShenronDragonBallCache\(\)([\s\S]*?)function Feature\.getShenronDragonBalls/)?.[1] ?? "";
+  const collectBody = source.match(/function Feature\.collectShenronDragonBall\(ball\)([\s\S]*?)function Feature\.getShenronTurnInTarget/)?.[1] ?? "";
+  const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.autoShenronStep/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoShenronStep\(\)([\s\S]*?)function Feature\.toggleShenron/)?.[1] ?? "";
+  const toggleBody = source.match(/function Feature\.toggleShenron\(value\)([\s\S]*?)\nfunction Feature\.getBattlepassRewardModule/)?.[1] ?? "";
+
+  assert.match(source, /autoShenron = false/);
+  assert.match(source, /shenron = \{/);
+  assert.match(source, /shenronStatus = "Waiting for data\."/);
+  assert.match(source, /SuperShenronClaimWish = \{ "ReplicatedStorage", "Remotes", "SuperShenronEvent", "ClaimWish" \}/);
+  assert.match(source, /function Feature\.getShenronScanRoots/);
+  assert.match(source, /function Feature\.getShenronDragonBallName/);
+  assert.match(source, /function Feature\.refreshShenronDragonBallCache/);
+  assert.match(source, /function Feature\.collectShenronDragonBall/);
+  assert.match(source, /function Feature\.getShenronTurnInTarget/);
+  assert.match(source, /function Feature\.turnInShenronDragonBalls/);
+  assert.match(source, /function Feature\.autoShenronStep/);
+  assert.match(source, /function Feature\.toggleShenron/);
+  assert.match(scanRootsBody, /workspace:FindFirstChild\("EventAttachments"\)/);
+  assert.match(scanRootsBody, /workspace:FindFirstChild\("MutationStuffs"\)/);
+  assert.match(refreshBody, /Feature\.getShenronDragonBallName\(instance\)/);
+  assert.match(refreshBody, /DragonBall%d/);
+  assert.match(collectBody, /Feature\.teleportToBuharaObject\(ball\.instance, Config\.shenron\.ballCollectDistance\)/);
+  assert.match(collectBody, /Feature\.touchInstance\(ball\.instance\)/);
+  assert.match(turnInBody, /Feature\.getShenronTurnInTarget\(\)/);
+  assert.match(turnInBody, /Remote\.fire\("SuperShenronClaimWish"\)/);
+  assert.match(stepBody, /Feature\.shouldPauseShenronForAutoMerge\(\)/);
+  assert.match(stepBody, /Feature\.getShenronDragonBalls\(\)/);
+  assert.match(stepBody, /Feature\.turnInShenronDragonBalls\(\)/);
+  assert.match(toggleBody, /Feature\.startLoop\("autoShenron", Feature\.getAutoShenronLoopDelay, Feature\.autoShenronStep\)/);
+  assert.match(source, /UI\.toggle\(shenron, "Auto Shenron Collect and Wish"[\s\S]*?Feature\.toggleShenron/);
+  assert.match(startupBody, /if Config\.flags\.autoShenron then\s+Feature\.toggleShenron\(true\)/);
+});
+
 test("anti afk is enabled by default and user-toggleable in settings", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
