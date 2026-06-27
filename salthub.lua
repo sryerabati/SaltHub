@@ -4066,6 +4066,10 @@ function Feature.ensureHighestWaveCheckpoint()
 end
 
 function Feature.autoStartWaveStep()
+    if Feature.shouldPauseWaveStartForBoorus() then
+        return
+    end
+
     if not Feature.shouldStartWave() then
         return
     end
@@ -9007,10 +9011,22 @@ function Feature.isBoorusChallengeReady()
     return lastChallenge <= 0 and statusText:find("challenge now", 1, true) ~= nil
 end
 
+function Feature.shouldPauseWaveStartForBoorus()
+    return Config.flags.autoBoorus == true and Feature.isBoorusChallengeReady()
+end
+
 function Feature.startBoorusChallengeIfReady()
     if not Feature.isBoorusChallengeReady() then
         local statusText = Feature.getBoorusChallengeText()
         State.boorusStatus = statusText ~= "" and statusText or "Boorus challenge is not ready yet."
+        return false
+    end
+
+    if Feature.isWaveStarted() then
+        State.boorusStatus = "Stopping wave before Boorus challenge."
+        Log.push(State.boorusStatus)
+        Remote.fire("EndWave")
+        task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.2))
         return false
     end
 

@@ -262,6 +262,7 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   const spinBody = source.match(/function Feature\.boorusSpinOnce\(\)([\s\S]*?)\nfunction Feature\.runBoorusFightSupport/)?.[1] ?? "";
   const stepBody = source.match(/function Feature\.autoBoorusStep\(\)([\s\S]*?)\nfunction Feature\.toggleBoorus/)?.[1] ?? "";
   const toggleBody = source.match(/function Feature\.toggleBoorus\(value\)([\s\S]*?)\nfunction Feature\.getBuharaData/)?.[1] ?? "";
+  const autoStartWaveBody = source.match(/function Feature\.autoStartWaveStep\(\)([\s\S]*?)\nfunction Feature\.setAutoStartWave/)?.[1] ?? "";
 
   assert.match(source, /autoBoorus = false/);
   assert.match(source, /boorus = \{/);
@@ -270,6 +271,7 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(source, /function Feature\.getBoorusSpinCount/);
   assert.match(source, /function Feature\.getBoorusChallengePrompt/);
   assert.match(source, /function Feature\.isBoorusChallengeReady/);
+  assert.match(source, /function Feature\.shouldPauseWaveStartForBoorus/);
   assert.match(source, /function Feature\.startBoorusChallengeIfReady/);
   assert.match(source, /function Feature\.attachBoorusSpinComplete/);
   assert.match(source, /function Feature\.boorusSpinOnce/);
@@ -277,6 +279,10 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(source, /function Feature\.toggleBoorus/);
   assert.match(readyBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
   assert.match(readyBody, /os\.time\(\) \/\/ 86400/);
+  assert.match(startBody, /if Feature\.isWaveStarted\(\) then/);
+  assert.match(startBody, /Remote\.fire\("EndWave"\)/);
+  assert.ok(startBody.indexOf("Remote.fire(\"EndWave\")") < startBody.indexOf("Feature.moveNearInstance(prompt, Config.boorus.promptDistance)"));
+  assert.match(autoStartWaveBody, /Feature\.shouldPauseWaveStartForBoorus\(\)/);
   assert.match(startBody, /Feature\.moveNearInstance\(prompt, Config\.boorus\.promptDistance\)/);
   assert.match(startBody, /Feature\.holdPrompt\(prompt\)/);
   assert.match(spinBody, /Feature\.getBoorusSpinCount\(\)/);
