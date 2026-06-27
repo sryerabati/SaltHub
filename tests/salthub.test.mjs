@@ -628,7 +628,7 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   assert.doesNotMatch(source, /"Detected Podium"/);
   assert.match(source, /unitMutationTargets = \{\}/);
   assert.match(source, /local function normalizeUnitMutationTargets\(targets\)/);
-  assert.match(source, /local clean = expandMutationTargetsForAutoBuy\(mutationList\)/);
+  assert.match(source, /local clean = uniqueSorted\(mutationList\)/);
   assert.match(source, /Config\.roll\.unitMutationTargets = normalizeUnitMutationTargets\(Config\.roll\.unitMutationTargets\)/);
   assert.match(source, /function UI\.unitMutationSelector/);
   assert.match(source, /UI\.unitMutationSelector\(.*"Target Units"/s);
@@ -847,25 +847,6 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.doesNotMatch(buyBody, /bought = Feature\.holdPrompt\(entry\.prompt\)/);
   const toggleBody = source.match(/function Feature\.toggleAutoRoll\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(toggleBody, /Feature\.returnToRollStation\(\)/);
-});
-
-test("auto buy expands Nen mutation targets to Super Shenron aliases", () => {
-  const source = fs.readFileSync(sourcePath, "utf8");
-  const expandBody = source.match(/local function expandMutationTargetsForAutoBuy\(list\)([\s\S]*?)\nlocal function normalizeUnitMutationTargets/)?.[1] ?? "";
-  const normalizeBody = source.match(/local function normalizeUnitMutationTargets\(targets\)([\s\S]*?)\nlocal function splitCsv/)?.[1] ?? "";
-  const saveBody = source.match(/function Feature\.saveConfigToWorkspace\(reason, quiet\)([\s\S]*?)\nfunction Feature\.scheduleConfigSave/)?.[1] ?? "";
-  const applyBody = source.match(/function Feature\.applyAutoRollSettingsLocal\(\)([\s\S]*?)\nfunction Feature\.pushAutoRollSettings/)?.[1] ?? "";
-
-  assert.match(source, /local function expandMutationTargetsForAutoBuy\(list\)/);
-  assert.match(expandBody, /normalizeMutationTargetKey\(mutationName\) == "nen"/);
-  assert.match(expandBody, /"SuperShenron"/);
-  assert.match(expandBody, /"Super Shenron"/);
-  assert.match(expandBody, /"Shenron"/);
-  assert.match(normalizeBody, /local clean = expandMutationTargetsForAutoBuy\(mutationList\)/);
-  assert.match(saveBody, /Config\.roll\.targetMutations = expandMutationTargetsForAutoBuy\(Config\.roll\.targetMutations\)/);
-  assert.match(saveBody, /Config\.roll\.unitMutationTargets = normalizeUnitMutationTargets\(Config\.roll\.unitMutationTargets\)/);
-  assert.match(applyBody, /Config\.roll\.targetMutations = expandMutationTargetsForAutoBuy\(Config\.roll\.targetMutations\)/);
-  assert.match(applyBody, /Config\.roll\.unitMutationTargets = normalizeUnitMutationTargets\(Config\.roll\.unitMutationTargets\)/);
 });
 
 test("auto buy supports six podium roll results with unique slot keys", () => {

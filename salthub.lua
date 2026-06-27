@@ -529,33 +529,6 @@ local function uniqueSorted(list)
     return out
 end
 
-local function normalizeMutationTargetKey(value)
-    return tostring(value or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", "")
-end
-
-local function expandMutationTargetsForAutoBuy(list)
-    local out = {}
-    local addSuperShenron = false
-    for _, mutation in ipairs(list or {}) do
-        local mutationName = tostring(mutation or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if mutationName ~= "" then
-            table.insert(out, mutationName)
-            local mutationKey = normalizeMutationTargetKey(mutationName)
-            if normalizeMutationTargetKey(mutationName) == "nen" or mutationKey == "supershenron" or mutationKey == "shenron" then
-                addSuperShenron = true
-            end
-        end
-    end
-
-    if addSuperShenron then
-        table.insert(out, "SuperShenron")
-        table.insert(out, "Super Shenron")
-        table.insert(out, "Shenron")
-    end
-
-    return uniqueSorted(out)
-end
-
 local function normalizeUnitMutationTargets(targets)
     local out = {}
     if type(targets) ~= "table" then
@@ -573,7 +546,7 @@ local function normalizeUnitMutationTargets(targets)
                 end
             end
 
-            local clean = expandMutationTargetsForAutoBuy(mutationList)
+            local clean = uniqueSorted(mutationList)
             if #clean > 0 then
                 out[unitName] = clean
             end
@@ -3019,7 +2992,6 @@ function Feature.saveConfigToWorkspace(reason, quiet)
         return false
     end
 
-    Config.roll.targetMutations = expandMutationTargetsForAutoBuy(Config.roll.targetMutations)
     Config.roll.unitMutationTargets = normalizeUnitMutationTargets(Config.roll.unitMutationTargets)
 
     local ok, encoded = pcall(function()
@@ -4035,7 +4007,7 @@ end
 
 function Feature.applyAutoRollSettingsLocal()
     Config.roll.targetUnits = uniqueSorted(Config.roll.targetUnits)
-    Config.roll.targetMutations = expandMutationTargetsForAutoBuy(Config.roll.targetMutations)
+    Config.roll.targetMutations = uniqueSorted(Config.roll.targetMutations)
     Config.roll.unitMutationTargets = normalizeUnitMutationTargets(Config.roll.unitMutationTargets)
     Config.roll.snipeEvents = uniqueSorted(Config.roll.snipeEvents)
     State.cachedSelectedEventActive = false
@@ -10395,7 +10367,6 @@ function Feature.importConfig(text)
         mergeConfig(Config, decoded.Config or decoded)
         applyBestLineupOptimizerDefaults()
         applyAutoRollTimingSafetyDefaults()
-        Feature.applyAutoRollSettingsLocal()
         if UI.scale then
             UI.scale.Scale = Config.ui.scale
         end
