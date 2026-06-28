@@ -229,6 +229,7 @@ local Config = {
     boorus = {
         promptDistance = 3.0,
         startCooldown = 6.0,
+        startConfirmTimeout = 4.0,
         spinBusyTime = 6.8,
         spinCompleteDelay = 0.65,
         fightSupportWindow = 600,
@@ -9172,12 +9173,49 @@ function Feature.shouldPauseWaveStartForBoorus()
     return Config.flags.autoBoorus == true and Feature.isBoorusChallengeReady()
 end
 
+function Feature.isBoorusChallengeActive()
+    local mutationContainer = workspace:FindFirstChild("MutationStuffs")
+    return mutationContainer and mutationContainer:FindFirstChild("BeerusMap") ~= nil
+end
+
+function Feature.waitForBoorusChallengeActive(timeout)
+    local deadline = os.clock() + math.max(tonumber(timeout) or 4, 1)
+    repeat
+        if Feature.isBoorusChallengeActive() then
+            return true
+        end
+        task.wait(0.15)
+    until os.clock() >= deadline
+    return Feature.isBoorusChallengeActive()
+end
+
+function Feature.disableAutoSkipForBoorus()
+    if Feature.dataGet("AutoSkip", false) ~= true then
+        return false
+    end
+
+    State.boorusStatus = "Disabling auto skip before Boorus challenge."
+    Log.push(State.boorusStatus)
+    return Remote.fire("AutoSkip")
+end
+
 function Feature.startBoorusChallengeIfReady()
+    if Feature.isBoorusChallengeActive() then
+        State.boorusFightUntil = math.max(
+            tonumber(State.boorusFightUntil) or 0,
+            os.clock() + math.max(tonumber(Config.boorus.fightSupportWindow) or 600, 60)
+        )
+        State.boorusStatus = "Boorus challenge active."
+        return true
+    end
+
     if not Feature.isBoorusChallengeReady() then
         local statusText = Feature.getBoorusChallengeText()
         State.boorusStatus = statusText ~= "" and statusText or "Boorus challenge is not ready yet."
         return false
     end
+
+    Feature.disableAutoSkipForBoorus()
 
     if Feature.isWaveStarted() then
         State.boorusStatus = "Stopping wave before Boorus challenge."
@@ -9199,17 +9237,20 @@ function Feature.startBoorusChallengeIfReady()
     end
 
     State.lastBoorusChallengeStartAt = now
-    Feature.moveNearInstance(prompt, Config.boorus.promptDistance)
-    local ok = Feature.holdPrompt(prompt)
-    if ok then
+    local moved = Feature.moveToPromptNaturally(prompt, Config.boorus.promptDistance)
+    local prompted = moved and Feature.holdPromptNaturally(prompt)
+    if prompted and Feature.waitForBoorusChallengeActive(Config.boorus.startConfirmTimeout) then
         State.boorusFightUntil = os.clock() + math.max(tonumber(Config.boorus.fightSupportWindow) or 600, 60)
         State.boorusStatus = "Boorus challenge started."
         Log.push(State.boorusStatus)
         task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.2))
+        return true
+    elseif prompted then
+        State.boorusStatus = "Boorus challenge did not activate."
     else
         State.boorusStatus = "Boorus challenge prompt failed."
     end
-    return ok
+    return false
 end
 
 function Feature.attachBoorusSpinComplete()
