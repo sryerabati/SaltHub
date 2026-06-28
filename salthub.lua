@@ -246,13 +246,44 @@ local function decodeKeyCode(value, fallback)
     return Enum.KeyCode[keyName] or fallback
 end
 
+local function isConfigArray(value)
+    if type(value) ~= "table" then
+        return false
+    end
+
+    local count = 0
+    local maxIndex = 0
+    for key in pairs(value) do
+        if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then
+            return false
+        end
+        count += 1
+        maxIndex = math.max(maxIndex, key)
+    end
+    return count > 0 and count == maxIndex
+end
+
+local function cloneConfigValue(value)
+    if type(value) ~= "table" then
+        return value
+    end
+
+    local out = {}
+    for key, item in pairs(value) do
+        out[key] = cloneConfigValue(item)
+    end
+    return out
+end
+
 local function mergeConfig(target, source)
     if type(target) ~= "table" or type(source) ~= "table" then
         return
     end
 
     for key, value in pairs(source) do
-        if type(value) == "table" and type(target[key]) == "table" then
+        if type(value) == "table" and type(target[key]) == "table" and (isConfigArray(value) or isConfigArray(target[key])) then
+            target[key] = cloneConfigValue(value)
+        elseif type(value) == "table" and type(target[key]) == "table" then
             mergeConfig(target[key], value)
         elseif key == "keybind" then
             target[key] = decodeKeyCode(value, target[key])

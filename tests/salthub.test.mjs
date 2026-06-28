@@ -963,6 +963,20 @@ test("trait reroll uses selectable inventory and trait rarity tables", () => {
   assert.doesNotMatch(source, /"Known Traits"/);
 });
 
+test("saved trait reroll targets replace defaults on launch", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const mergeConfigBody = source.match(/local function mergeConfig\(target, source\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const traitSelectorBody = source.match(/function UI\.traitSelector\(parent, title, optionsGetter, selectedGetter, setter, height\)([\s\S]*?)\nfunction UI\.unitMutationSelector/)?.[1] ?? "";
+
+  assert.match(source, /function UI\.traitSelector/);
+  assert.match(source, /Config\.trait\.targetTraits = traits/);
+  assert.match(traitSelectorBody, /Feature\.scheduleConfigSave\("ui:" \.\. tostring\(title\)\)/);
+  assert.match(source, /function isConfigArray/);
+  assert.match(source, /function cloneConfigValue/);
+  assert.match(mergeConfigBody, /isConfigArray\(value\)/);
+  assert.match(mergeConfigBody, /target\[key\] = cloneConfigValue\(value\)/);
+});
+
 test("trait reroll uses game trait data and the native roll contract", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
