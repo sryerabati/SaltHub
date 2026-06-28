@@ -866,6 +866,29 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.doesNotMatch(toggleBody, /Feature\.returnToRollStation\(\)/);
 });
 
+test("auto roll and new auto buys pause while Boorus owns movement", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const pauseBody = source.match(/function Feature\.shouldPauseRollForBoorus\(\)([\s\S]*?)\nfunction Feature\.autoRollStep/)?.[1] ?? "";
+  const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nfunction Feature\.shouldPauseRollForBoorus/)?.[1] ?? "";
+  const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nfunction Feature\.describeRolledCharacters/)?.[1] ?? "";
+  const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nfunction Feature\.toggleAutoBuy/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.shouldPauseRollForBoorus/);
+  assert.match(pauseBody, /Config\.flags\.autoBoorus ~= true/);
+  assert.match(pauseBody, /State\.boorusSpinBusyUntil/);
+  assert.match(pauseBody, /State\.boorusFightUntil/);
+  assert.match(pauseBody, /Feature\.getBoorusSpinCount\(\) > 0/);
+  assert.match(pauseBody, /Feature\.isBoorusChallengeActive\(\)/);
+  assert.match(pauseBody, /Feature\.isBoorusChallengeReady\(\)/);
+  assert.match(delayBody, /Feature\.shouldPauseRollForBoorus\(\)/);
+  assert.match(rollBody, /if Feature\.shouldPauseRollForBoorus\(\) then[\s\S]*?return/);
+  assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.reserveBuyBeforeRolling()"));
+  assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.rollOnce()"));
+  assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
+  assert.ok(buyBody.indexOf("Feature.findPendingBuyCandidate()") < buyBody.indexOf("Feature.shouldPauseRollForBoorus()"));
+  assert.ok(buyBody.indexOf("Feature.shouldPauseRollForBoorus()") < buyBody.indexOf("Feature.findMatchingRolledCharacter()"));
+});
+
 test("auto buy supports six podium roll results with unique slot keys", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const rolledModelsBody = source.match(/function Feature\.getRolledCharacterModels\(\)([\s\S]*?)\nfunction Feature\.getRolledCharacters/)?.[1] ?? "";

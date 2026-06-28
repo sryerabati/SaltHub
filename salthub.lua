@@ -5523,11 +5523,35 @@ function Feature.getAutoRollLoopDelay()
     if State.buyingCharacter or State.pendingBuy then
         return tonumber(Config.delays.buyRetryPoll) or 0.35
     end
+    if Feature.shouldPauseRollForBoorus() then
+        return math.max(tonumber(Config.delays.event) or 1, tonumber(Config.boorus.fightSupportPoll) or 2)
+    end
     local holdRemaining = (tonumber(State.pityHoldUntil) or 0) - os.clock()
     if holdRemaining > baseDelay then
         return math.max(baseDelay, holdRemaining)
     end
     return baseDelay
+end
+
+function Feature.shouldPauseRollForBoorus()
+    if Config.flags.autoBoorus ~= true then
+        return false
+    end
+
+    local now = os.clock()
+    if now < (tonumber(State.boorusSpinBusyUntil) or 0) then
+        return true
+    end
+    if now <= (tonumber(State.boorusFightUntil) or 0) then
+        return true
+    end
+    if Feature.getBoorusSpinCount() > 0 then
+        return true
+    end
+    if Feature.isBoorusChallengeActive() then
+        return true
+    end
+    return Feature.isBoorusChallengeReady()
 end
 
 function Feature.autoRollStep()
@@ -5554,6 +5578,11 @@ function Feature.autoRollStep()
     end
 
     State.pityHoldUntil = 0
+
+    if Feature.shouldPauseRollForBoorus() then
+        State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + math.max(tonumber(Config.delays.event) or 1, 1))
+        return
+    end
 
     local reserved = Feature.reserveBuyBeforeRolling()
     if reserved then
@@ -5631,6 +5660,10 @@ function Feature.autoBuyStep()
     end
     if State.pendingBuy then
         Feature.extendPendingBuyHold()
+        return false
+    end
+
+    if Feature.shouldPauseRollForBoorus() then
         return false
     end
 
