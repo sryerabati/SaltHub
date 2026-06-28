@@ -98,7 +98,7 @@ local Config = {
         autoBoorus = false,
         autoBattlepass = false,
         autoVipRewards = false,
-        optimizeNativeMenus = true,
+        optimizeNativeMenus = false,
     },
     wave = {
         fastForward = "x2",
@@ -302,7 +302,7 @@ local function applyBestLineupOptimizerDefaults()
 end
 
 local function applyNativeMenuOptimizerSafetyDefaults()
-    Config.flags.optimizeNativeMenus = true
+    Config.flags.optimizeNativeMenus = false
     Config.safety.nativeRootScanBatch = math.min(math.max(tonumber(Config.safety.nativeRootScanBatch) or 96, 1), 96)
     Config.safety.nativePreviewBatch = math.min(math.max(tonumber(Config.safety.nativePreviewBatch) or 2, 1), 2)
     Config.safety.nativeVisualEffectBatch = math.min(math.max(tonumber(Config.safety.nativeVisualEffectBatch) or 32, 1), 32)
@@ -310,6 +310,10 @@ local function applyNativeMenuOptimizerSafetyDefaults()
     if mode == "" or mode == "static" then
         Config.safety.nativePreviewMode = "Hide"
     end
+end
+
+local function resetSessionOnlySettings()
+    Config.flags.optimizeNativeMenus = false
 end
 
 local function applyAutoRollTimingSafetyDefaults()
@@ -472,6 +476,7 @@ if presetApplied and savedConfigApplied then
     workspaceConfigStatus = tostring(workspaceConfigStatus) .. " (overrode launch preset)"
 end
 applyBestLineupOptimizerDefaults()
+resetSessionOnlySettings()
 applyNativeMenuOptimizerSafetyDefaults()
 applyAutoRollTimingSafetyDefaults()
 
@@ -2975,6 +2980,10 @@ Feature = {
     nativeMenuUiWasVisible = nil,
 }
 
+function Feature.resetSessionOnlySettings()
+    resetSessionOnlySettings()
+end
+
 function Feature.getConfigStoragePath()
     return getExecutorConfigPath()
 end
@@ -3289,6 +3298,25 @@ function Feature.freezeNativeVisualEffect(effect)
         return false
     end
 
+    if effect:GetAttribute("SaltHubHadOriginalEffectEnabled") ~= true then
+        effect:SetAttribute("SaltHubHadOriginalEffectEnabled", true)
+        local enabledOk, enabled = pcall(function()
+            return effect.Enabled
+        end)
+        if enabledOk then
+            effect:SetAttribute("SaltHubOriginalEffectEnabled", enabled == true)
+        end
+    end
+    if effect:IsA("UIGradient") and effect:GetAttribute("SaltHubHadOriginalGradientState") ~= true then
+        effect:SetAttribute("SaltHubHadOriginalGradientState", true)
+        pcall(function()
+            effect:SetAttribute("SaltHubOriginalGradientOffset", effect.Offset)
+        end)
+        pcall(function()
+            effect:SetAttribute("SaltHubOriginalGradientRotation", effect.Rotation)
+        end)
+    end
+
     effect:SetAttribute("SaltHubFrozenVisualEffect", true)
     if effect:IsA("UIGradient") then
         pcall(function()
@@ -3305,6 +3333,37 @@ function Feature.freezeNativeVisualEffect(effect)
             effect.Enabled = false
         end)
     end
+    return true
+end
+
+function Feature.restoreNativeVisualEffect(effect)
+    if not Feature.isNativeVisualEffect(effect) then
+        return false
+    end
+
+    if effect:GetAttribute("SaltHubHadOriginalEffectEnabled") == true then
+        local originalEnabled = effect:GetAttribute("SaltHubOriginalEffectEnabled")
+        if originalEnabled ~= nil then
+            pcall(function()
+                effect.Enabled = originalEnabled == true
+            end)
+        end
+    end
+    if effect:IsA("UIGradient") and effect:GetAttribute("SaltHubHadOriginalGradientState") == true then
+        local originalOffset = effect:GetAttribute("SaltHubOriginalGradientOffset")
+        local originalRotation = effect:GetAttribute("SaltHubOriginalGradientRotation")
+        if originalOffset ~= nil then
+            pcall(function()
+                effect.Offset = originalOffset
+            end)
+        end
+        if originalRotation ~= nil then
+            pcall(function()
+                effect.Rotation = originalRotation
+            end)
+        end
+    end
+    effect:SetAttribute("SaltHubFrozenVisualEffect", false)
     return true
 end
 
@@ -3378,10 +3437,18 @@ function Feature.freezeNativePreviewViewport(viewport)
     viewport:SetAttribute("SaltHubStaticPreview", true)
     for _, descendant in ipairs(worldModel:GetDescendants()) do
         if descendant:IsA("LocalScript") then
+            if descendant:GetAttribute("SaltHubHadOriginalScriptDisabled") ~= true then
+                descendant:SetAttribute("SaltHubHadOriginalScriptDisabled", true)
+                descendant:SetAttribute("SaltHubOriginalScriptDisabled", descendant.Disabled == true)
+            end
             pcall(function()
                 descendant.Disabled = true
             end)
         elseif descendant:IsA("BasePart") then
+            if descendant:GetAttribute("SaltHubHadOriginalPartAnchored") ~= true then
+                descendant:SetAttribute("SaltHubHadOriginalPartAnchored", true)
+                descendant:SetAttribute("SaltHubOriginalPartAnchored", descendant.Anchored == true)
+            end
             pcall(function()
                 descendant.Anchored = true
             end)
@@ -3721,6 +3788,51 @@ function Feature.attachNativeMenuOptimizer()
     Feature.optimizeNativeMenuPreviews(Config.safety.nativePreviewBatch)
 end
 
+function Feature.restoreNativeMenuOptimizerMutations()
+    Feature.nativeMenuQueuedRootScans = {}
+    Feature.nativeMenuQueuedViewports = {}
+    Feature.nativeMenuQueuedVisualEffects = {}
+    Feature.setSaltHubUiSuspendedForNativeMenu(false)
+
+    for _, root in ipairs(Feature.getNativeMenuRoots()) do
+        if root and root.Parent then
+            for _, descendant in ipairs(root:GetDescendants()) do
+                if descendant:IsA("ViewportFrame") then
+                    Feature.restoreNativePreviewVisibility(descendant)
+                    descendant:SetAttribute("SaltHubStaticPreview", false)
+                    descendant:SetAttribute("SaltHubHiddenPreview", false)
+                elseif descendant:IsA("LocalScript") and descendant:GetAttribute("SaltHubHadOriginalScriptDisabled") == true then
+                    local originalDisabled = descendant:GetAttribute("SaltHubOriginalScriptDisabled")
+                    if originalDisabled ~= nil then
+                        pcall(function()
+                            descendant.Disabled = originalDisabled == true
+                        end)
+                    end
+                elseif descendant:IsA("BasePart") and descendant:GetAttribute("SaltHubHadOriginalPartAnchored") == true then
+                    local originalAnchored = descendant:GetAttribute("SaltHubOriginalPartAnchored")
+                    if originalAnchored ~= nil then
+                        pcall(function()
+                            descendant.Anchored = originalAnchored == true
+                        end)
+                    end
+                elseif Feature.isNativeVisualEffect(descendant) then
+                    Feature.restoreNativeVisualEffect(descendant)
+                end
+            end
+        end
+    end
+
+    for _, root in ipairs(Feature.getNativeVisualEffectRoots()) do
+        if root and root.Parent then
+            for _, descendant in ipairs(root:GetDescendants()) do
+                if Feature.isNativeVisualEffect(descendant) then
+                    Feature.restoreNativeVisualEffect(descendant)
+                end
+            end
+        end
+    end
+end
+
 function Feature.setNativeMenuOptimizerEnabled(value)
     Config.flags.optimizeNativeMenus = value == true
     if Config.flags.optimizeNativeMenus then
@@ -3728,6 +3840,7 @@ function Feature.setNativeMenuOptimizerEnabled(value)
         Feature.optimizeNativeMenuPreviews(Config.safety.nativePreviewBatch)
         Log.push("Native menu optimizer enabled.")
     else
+        Feature.restoreNativeMenuOptimizerMutations()
         Log.push("Native menu optimizer disabled.")
     end
 end
@@ -10405,6 +10518,9 @@ function Feature.getSerializableConfig()
     local serialized = Feature.serializeConfigValue(Config)
     serialized.export = serialized.export or {}
     serialized.export.scriptUrl = Feature.getLaunchScriptUrl()
+    if type(serialized.flags) == "table" then
+        serialized.flags.optimizeNativeMenus = nil
+    end
     return serialized
 end
 
@@ -10440,6 +10556,8 @@ function Feature.importConfig(text)
     if ok and type(decoded) == "table" then
         mergeConfig(Config, decoded.Config or decoded)
         applyBestLineupOptimizerDefaults()
+        Feature.resetSessionOnlySettings()
+        applyNativeMenuOptimizerSafetyDefaults()
         applyAutoRollTimingSafetyDefaults()
         if UI.scale then
             UI.scale.Scale = Config.ui.scale
@@ -10726,6 +10844,7 @@ function SaltHub.Start()
     Feature.attachAntiAfk()
     Feature.startAntiAfkLoop()
     Feature.attachNativeMenuOpenGuard()
+    Feature.restoreNativeMenuOptimizerMutations()
     if Config.flags.optimizeNativeMenus then
         Feature.attachNativeMenuOptimizer()
     end
@@ -10753,6 +10872,7 @@ function SaltHub.Destroy()
     if State.configSaveQueued then
         Feature.saveConfigToWorkspace("destroy", true)
     end
+    Feature.restoreNativeMenuOptimizerMutations()
     for key in pairs(Feature.loops) do
         Feature.stopLoop(key)
     end

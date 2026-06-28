@@ -418,10 +418,12 @@ test("anti afk interval starts a periodic pulse loop before Roblox idled fires",
   assert.match(startBody, /Feature\.startAntiAfkLoop\(\)/);
 });
 
-test("native menu optimizer freezes or hides preview viewports across game menus", () => {
+test("native menu optimizer is opt-in per session and restores native UI when disabled", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const configBody = source.match(/local Config = \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  const safetyDefaultsBody = source.match(/local function applyNativeMenuOptimizerSafetyDefaults\(\)([\s\S]*?)\nend/)?.[1] ?? "";
 
-  assert.match(source, /optimizeNativeMenus = true/);
+  assert.match(configBody, /optimizeNativeMenus = false/);
   assert.match(source, /nativePreviewBatch = 2/);
   assert.match(source, /nativeVisualEffectBatch = 32/);
   assert.match(source, /nativePreviewMode = "Hide"/);
@@ -441,7 +443,9 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   assert.match(source, /function Feature\.attachNativeMenuOptimizer/);
   assert.match(source, /function Feature\.setNativeMenuOptimizerEnabled/);
   assert.match(source, /function applyNativeMenuOptimizerSafetyDefaults/);
-  assert.match(source, /Config\.flags\.optimizeNativeMenus = true/);
+  assert.match(safetyDefaultsBody, /Config\.flags\.optimizeNativeMenus = false/);
+  assert.match(source, /function Feature\.resetSessionOnlySettings/);
+  assert.match(source, /Feature\.resetSessionOnlySettings\(\)/);
   assert.match(source, /Config\.safety\.nativePreviewBatch = math\.min\(math\.max\(tonumber\(Config\.safety\.nativePreviewBatch\) or 2, 1\), 2\)/);
   assert.match(source, /Config\.safety\.nativeVisualEffectBatch = math\.min\(math\.max\(tonumber\(Config\.safety\.nativeVisualEffectBatch\) or 32, 1\), 32\)/);
   assert.match(source, /Config\.safety\.nativePreviewMode = "Hide"/);
@@ -474,6 +478,12 @@ test("native menu optimizer freezes or hides preview viewports across game menus
   const hideBody = source.match(/function Feature\.hideNativePreviewViewport\(viewport\)([\s\S]*?)\nfunction Feature\.freezeNativePreviewViewport/)?.[1] ?? "";
   assert.doesNotMatch(hideBody, /ClearAllChildren/);
   assert.match(source, /SaltHubHiddenPreview/);
+  assert.match(source, /function Feature\.restoreNativeVisualEffect/);
+  assert.match(source, /function Feature\.restoreNativeMenuOptimizerMutations/);
+  assert.match(source, /Feature\.restoreNativeMenuOptimizerMutations\(\)/);
+  assert.match(source, /SaltHubOriginalEffectEnabled/);
+  assert.match(source, /SaltHubOriginalPartAnchored/);
+  assert.match(source, /SaltHubOriginalScriptDisabled/);
   const menuAttachBody = source.match(/function Feature\.attachNativeMenuRoot\(Root\)([\s\S]*?)\nfunction Feature\.attachNativeVisualEffectRoot/)?.[1] ?? "";
   assert.doesNotMatch(menuAttachBody, /Root\.DescendantAdded:Connect/);
   const guardBody = source.match(/function Feature\.attachNativeMenuOpenGuard\(\)([\s\S]*?)\nfunction Feature\.optimizeNativeMenuPreviews/)?.[1] ?? "";
