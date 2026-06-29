@@ -334,6 +334,7 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   const source = fs.readFileSync(sourcePath, "utf8");
   const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.refreshShenronDragonBallCache/)?.[1] ?? "";
+  const ballNameBody = source.match(/function Feature\.getShenronDragonBallName\(instance\)([\s\S]*?)function Feature\.getShenronCollectPrompt/)?.[1] ?? "";
   const refreshBody = source.match(/function Feature\.refreshShenronDragonBallCache\(\)([\s\S]*?)function Feature\.getShenronDragonBalls/)?.[1] ?? "";
   const collectBody = source.match(/function Feature\.collectShenronDragonBall\(ball\)([\s\S]*?)function Feature\.getShenronTurnInTarget/)?.[1] ?? "";
   const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.autoShenronStep/)?.[1] ?? "";
@@ -345,10 +346,13 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(source, /shenron = \{/);
   assert.match(source, /wishPriority = \{ "UniqueTrait", "ManyFragments", "MeteorRain", "LuckBoost", "SkipCraftingMachine", "SkipCloningMachine" \}/);
   assert.match(source, /blockedWishNames = \{ "MillionDollars", "CashBoost" \}/);
+  assert.match(source, /function applyEventAutomationSafetyDefaults/);
+  assert.match(source, /Config\.shenron\.maxScanItems = math\.max\(tonumber\(Config\.shenron\.maxScanItems\) or 0, 1800\)/);
   assert.match(source, /shenronStatus = "Waiting for data\."/);
   assert.match(source, /SuperShenronClaimWish = \{ "ReplicatedStorage", "Remotes", "SuperShenronEvent", "ClaimWish" \}/);
   assert.match(source, /function Feature\.getShenronScanRoots/);
   assert.match(source, /function Feature\.getShenronDragonBallName/);
+  assert.match(source, /function Feature\.getShenronCollectPrompt/);
   assert.match(source, /function Feature\.refreshShenronDragonBallCache/);
   assert.match(source, /function Feature\.collectShenronDragonBall/);
   assert.match(source, /function Feature\.getShenronTurnInTarget/);
@@ -358,9 +362,15 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(source, /function Feature\.toggleShenron/);
   assert.match(scanRootsBody, /workspace:FindFirstChild\("EventAttachments"\)/);
   assert.match(scanRootsBody, /workspace:FindFirstChild\("MutationStuffs"\)/);
+  assert.match(ballNameBody, /\^Ball\(%d\)\$/);
+  assert.match(ballNameBody, /workspace:FindFirstChild\("MutationStuffs"\)/);
   assert.match(refreshBody, /Feature\.getShenronDragonBallName\(instance\)/);
+  assert.match(refreshBody, /Feature\.getShenronCollectPrompt\(instance\)/);
+  assert.match(refreshBody, /prompt = Feature\.getShenronCollectPrompt\(instance\)/);
   assert.match(refreshBody, /DragonBall%d/);
   assert.match(collectBody, /Feature\.teleportToBuharaObject\(ball\.instance, Config\.shenron\.ballCollectDistance\)/);
+  assert.match(collectBody, /Feature\.getShenronCollectPrompt\(ball\.instance\)/);
+  assert.match(collectBody, /Feature\.tryBuharaPrompt\(prompt\)/);
   assert.match(collectBody, /Feature\.touchInstance\(ball\.instance\)/);
   assert.match(bestWishBody, /Feature\.dataGet\("SuperShenronWishes", 0\)/);
   assert.match(bestWishBody, /Feature\.isBlockedShenronWish\(wishName\)/);

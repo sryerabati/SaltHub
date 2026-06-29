@@ -235,7 +235,7 @@ local Config = {
         scanInterval = 0.65,
         holdPoll = 4.0,
         holdLogInterval = 8.0,
-        maxScanItems = 650,
+        maxScanItems = 1800,
         claimCooldown = 3.0,
     },
     boorus = {
@@ -372,6 +372,11 @@ local function applyAutoRollTimingSafetyDefaults()
     Config.roll.promptDelayMax = math.max(tonumber(Config.roll.promptDelayMax) or 0, Config.roll.promptDelayMin)
     Config.roll.promptHoldExtraMin = math.max(tonumber(Config.roll.promptHoldExtraMin) or 0, 0)
     Config.roll.promptHoldExtraMax = math.max(tonumber(Config.roll.promptHoldExtraMax) or 0, Config.roll.promptHoldExtraMin)
+end
+
+local function applyEventAutomationSafetyDefaults()
+    Config.buhara.maxScanItems = math.max(tonumber(Config.buhara.maxScanItems) or 0, 450)
+    Config.shenron.maxScanItems = math.max(tonumber(Config.shenron.maxScanItems) or 0, 1800)
 end
 
 local workspaceConfigLoaded = false
@@ -522,6 +527,7 @@ applyBestLineupOptimizerDefaults()
 resetSessionOnlySettings()
 applyNativeMenuOptimizerSafetyDefaults()
 applyAutoRollTimingSafetyDefaults()
+applyEventAutomationSafetyDefaults()
 
 local Maid = { items = {} }
 function Maid:add(item)
@@ -10116,7 +10122,17 @@ function Feature.getShenronScanRoots()
     end
 
     add(workspace:FindFirstChild("EventAttachments"))
-    add(workspace:FindFirstChild("MutationStuffs"))
+    add(workspace:FindFirstChild("ShenronDragonBalls"))
+    local mutationStuffs = workspace:FindFirstChild("MutationStuffs")
+    if mutationStuffs then
+        for _, child in ipairs(mutationStuffs:GetChildren()) do
+            if tostring(child.Name or ""):match("^Ball%d$")
+                or textMatchesAny(child.Name, { "DragonBall", "Dragon Ball", "Shenron", "Super Dragon balls" }) then
+                add(child)
+            end
+        end
+        add(mutationStuffs)
+    end
     add(workspace:FindFirstChild("Debris"))
     add(workspace:FindFirstChild("Map"))
     for _, child in ipairs(workspace:GetChildren()) do
@@ -10158,6 +10174,44 @@ function Feature.getShenronDragonBallName(instance)
         if ballName then
             return ballName
         end
+        local ballNumber = tostring(current.Name or ""):match("^Ball(%d)$")
+        if ballNumber then
+            local mutationStuffs = workspace:FindFirstChild("MutationStuffs")
+            local shenronDragonBalls = workspace:FindFirstChild("ShenronDragonBalls")
+            local character = LocalPlayer.Character
+            if (mutationStuffs and current.Parent == mutationStuffs)
+                or (shenronDragonBalls and current:IsDescendantOf(shenronDragonBalls))
+                or (character and current:IsDescendantOf(character)) then
+                return "DragonBall" .. tostring(ballNumber)
+            end
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+function Feature.isShenronCollectPrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") or prompt.Enabled == false then
+        return false
+    end
+    return textMatchesAny(prompt.ActionText, { "Collect", "Dragon" }) or textMatchesAny(prompt.Name, { "Collect", "Dragon", "Ball" })
+end
+
+function Feature.getShenronCollectPrompt(instance)
+    local current = instance
+    while current and current ~= workspace do
+        if Feature.isShenronCollectPrompt(current) then
+            return current
+        end
+
+        local prompt = current:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if Feature.isShenronCollectPrompt(prompt) then
+            return prompt
+        end
+
+        if current.Parent == workspace then
+            break
+        end
         current = current.Parent
     end
     return nil
@@ -10193,6 +10247,7 @@ function Feature.refreshShenronDragonBallCache()
                         name = ballName,
                         instance = instance,
                         part = targetPart,
+                        prompt = Feature.getShenronCollectPrompt(instance),
                         distance = root and (root.Position - targetPart.Position).Magnitude or 0,
                     })
                 end
@@ -10242,6 +10297,11 @@ function Feature.collectShenronDragonBall(ball)
     for attempt = 1, math.max(tonumber(Config.shenron.collectRetries) or 1, 1) do
         Feature.teleportToBuharaObject(ball.instance, Config.shenron.ballCollectDistance)
         task.wait(0.06)
+        local prompt = ball.prompt or Feature.getShenronCollectPrompt(ball.instance)
+        if prompt then
+            Feature.tryBuharaPrompt(prompt)
+            task.wait(0.08)
+        end
         Feature.touchInstance(ball.instance)
         task.wait(0.18)
         if Feature.detectCarriedShenronDragonBall() or not ball.part or not ball.part:IsDescendantOf(workspace) then
@@ -10671,6 +10731,7 @@ function Feature.importConfig(text)
         Feature.resetSessionOnlySettings()
         applyNativeMenuOptimizerSafetyDefaults()
         applyAutoRollTimingSafetyDefaults()
+        applyEventAutomationSafetyDefaults()
         if UI.scale then
             UI.scale.Scale = Config.ui.scale
         end
