@@ -1615,6 +1615,28 @@ test("auto merge excludes locked characters from scan, selection, and merge exec
   assert.match(executeMergePlan, /Feature\.isUnitLocked\(plan\.target\)/);
 });
 
+test("settings include an unlock all action for locked units", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const getLockedUnits = source.match(/function Feature\.getLockedUnits\(\)([\s\S]*?)function Feature\.unlockUnit/)?.[1] ?? "";
+  const unlockUnit = source.match(/function Feature\.unlockUnit\(unit\)([\s\S]*?)function Feature\.unlockAllUnits/)?.[1] ?? "";
+  const unlockAll = source.match(/function Feature\.unlockAllUnits\(\)([\s\S]*?)function Feature\.traitScore/)?.[1] ?? "";
+  const settingsTab = source.match(/name = "Settings",[\s\S]*?render = function\(page\)([\s\S]*?)\n        end,\n    },/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.getLockedUnits/);
+  assert.match(source, /function Feature\.unlockUnit/);
+  assert.match(source, /function Feature\.unlockAllUnits/);
+  assert.match(getLockedUnits, /State\.scanUnits\(\)/);
+  assert.match(getLockedUnits, /Feature\.isUnitLocked\(unit\)/);
+  assert.match(unlockUnit, /Feature\.waitForRemoteCooldown\("CharacterLock"\)/);
+  assert.match(unlockUnit, /Remote\.fire\("CharacterLock", \{\s+CharacterId = tostring\(unit\.id\),\s+Name = unit\.name,\s+Locked = false,\s+\}\)/);
+  assert.match(unlockUnit, /unit\.locked = false/);
+  assert.match(unlockUnit, /State\.lockedUnitIds\[tostring\(unit\.id\)\] = nil/);
+  assert.match(unlockAll, /local lockedUnits = Feature\.getLockedUnits\(\)/);
+  assert.match(unlockAll, /Feature\.unlockUnit\(unit\)/);
+  assert.match(unlockAll, /State\.scanUnits\(\)/);
+  assert.match(settingsTab, /UI\.button\(ui, "Unlock All", Feature\.unlockAllUnits, Theme\.accent2\)/);
+});
+
 test("merge placement scans for a cell where the selected shape actually fits", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const findMergePlacementCell = source.match(/function Feature\.findMergePlacementCell\(unit, preferredCell\)([\s\S]*?)\nend/)?.[1] ?? "";

@@ -7932,6 +7932,79 @@ function Feature.setAutoBestLineup(value)
     end
 end
 
+function Feature.waitForRemoteCooldown(key)
+    local cooldown = tonumber(Config.safety.remoteCooldown) or 0
+    if cooldown <= 0 then
+        return
+    end
+
+    local elapsed = os.clock() - (Remote.lastSent[key] or 0)
+    local remaining = cooldown - elapsed
+    if remaining > 0 then
+        task.wait(remaining + 0.02)
+    end
+end
+
+function Feature.getLockedUnits()
+    local lockedUnits = {}
+    local seen = {}
+    State.scanUnits()
+    for _, unit in ipairs(State.characters) do
+        local id = tostring(unit and unit.id or "")
+        if id ~= "" and not seen[id] and Feature.isUnitLocked(unit) then
+            seen[id] = true
+            table.insert(lockedUnits, unit)
+        end
+    end
+    return lockedUnits
+end
+
+function Feature.unlockUnit(unit)
+    if not unit or tostring(unit.id or "") == "" then
+        return false
+    end
+
+    Feature.waitForRemoteCooldown("CharacterLock")
+    local ok = Remote.fire("CharacterLock", {
+        CharacterId = tostring(unit.id),
+        Name = unit.name,
+        Locked = false,
+    })
+    if ok then
+        unit.locked = false
+        State.lockedUnitIds[tostring(unit.id)] = nil
+        State.lockedUnitIdsReady = true
+        if unit.instance then
+            for _, attrName in ipairs(UNIT_LOCK_VALUE_NAMES) do
+                pcall(function()
+                    unit.instance:SetAttribute(attrName, false)
+                end)
+            end
+        end
+    end
+    return ok
+end
+
+function Feature.unlockAllUnits()
+    local lockedUnits = Feature.getLockedUnits()
+    if #lockedUnits == 0 then
+        Log.push("Unlock All: no locked units found.")
+        return true
+    end
+
+    local unlocked = 0
+    for _, unit in ipairs(lockedUnits) do
+        if Feature.unlockUnit(unit) then
+            unlocked += 1
+        end
+    end
+    State.lockedUnitIds = {}
+    State.lockedUnitIdsReady = false
+    State.scanUnits()
+    Log.push("Unlock All sent for " .. tostring(unlocked) .. "/" .. tostring(#lockedUnits) .. " locked units.")
+    return unlocked > 0
+end
+
 function Feature.traitScore(unit)
     local score = tonumber(unit and unit.level) or 0
     local trait = normalizeText(unit and unit.trait)
@@ -11173,6 +11246,7 @@ local Tabs = {
                 Feature.restartAntiAfkLoop()
             end, 30, 300, 15)
             UI.button(ui, "Test Anti-AFK", Feature.testAntiAfk, Theme.accent)
+            UI.button(ui, "Unlock All", Feature.unlockAllUnits, Theme.accent2)
             UI.button(ui, "Save Settings Now", Feature.saveConfigToWorkspace, Theme.accent2)
             UI.button(ui, "Copy Launch Script", Feature.exportLaunchScript, Theme.accent)
             UI.textBox(ui, "Paste JSON config then press Enter", "", Feature.importConfig)
