@@ -296,6 +296,7 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(source, /function Feature\.startBoorusChallengeIfReady/);
   assert.match(source, /function Feature\.attachBoorusSpinComplete/);
   assert.match(source, /function Feature\.boorusSpinOnce/);
+  assert.match(source, /function Feature\.describeBoorusAvailability/);
   assert.match(source, /function Feature\.autoBoorusStep/);
   assert.match(source, /function Feature\.toggleBoorus/);
   assert.match(readyBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
@@ -323,12 +324,13 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(stepBody, /Feature\.boorusSpinOnce\(\)/);
   assert.match(stepBody, /Feature\.startBoorusChallengeIfReady\(\)/);
   assert.match(stepBody, /Feature\.runBoorusFightSupport\(\)/);
+  assert.match(stepBody, /State\.boorusStatus = Feature\.describeBoorusAvailability\(\)/);
   assert.match(toggleBody, /Feature\.startLoop\("autoBoorus"/);
   assert.match(source, /UI\.toggle\(boorus, "Auto Boorus"[\s\S]*?Feature\.toggleBoorus/);
   assert.match(startupBody, /if Config\.flags\.autoBoorus then\s+Feature\.toggleBoorus\(true\)/);
 });
 
-test("auto Shenron collects dragon balls and claims the wish", () => {
+test("auto Shenron collects dragon balls and claims the best unlocked non-cash wish", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.refreshShenronDragonBallCache/)?.[1] ?? "";
@@ -337,9 +339,12 @@ test("auto Shenron collects dragon balls and claims the wish", () => {
   const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.autoShenronStep/)?.[1] ?? "";
   const stepBody = source.match(/function Feature\.autoShenronStep\(\)([\s\S]*?)function Feature\.toggleShenron/)?.[1] ?? "";
   const toggleBody = source.match(/function Feature\.toggleShenron\(value\)([\s\S]*?)\nfunction Feature\.getBattlepassRewardModule/)?.[1] ?? "";
+  const bestWishBody = source.match(/function Feature\.getBestShenronWish\(\)([\s\S]*?)\nfunction Feature\.turnInShenronDragonBalls/)?.[1] ?? "";
 
   assert.match(source, /autoShenron = false/);
   assert.match(source, /shenron = \{/);
+  assert.match(source, /wishPriority = \{ "UniqueTrait", "ManyFragments", "MeteorRain", "LuckBoost", "SkipCraftingMachine", "SkipCloningMachine" \}/);
+  assert.match(source, /blockedWishNames = \{ "MillionDollars", "CashBoost" \}/);
   assert.match(source, /shenronStatus = "Waiting for data\."/);
   assert.match(source, /SuperShenronClaimWish = \{ "ReplicatedStorage", "Remotes", "SuperShenronEvent", "ClaimWish" \}/);
   assert.match(source, /function Feature\.getShenronScanRoots/);
@@ -347,6 +352,7 @@ test("auto Shenron collects dragon balls and claims the wish", () => {
   assert.match(source, /function Feature\.refreshShenronDragonBallCache/);
   assert.match(source, /function Feature\.collectShenronDragonBall/);
   assert.match(source, /function Feature\.getShenronTurnInTarget/);
+  assert.match(source, /function Feature\.getBestShenronWish/);
   assert.match(source, /function Feature\.turnInShenronDragonBalls/);
   assert.match(source, /function Feature\.autoShenronStep/);
   assert.match(source, /function Feature\.toggleShenron/);
@@ -356,8 +362,12 @@ test("auto Shenron collects dragon balls and claims the wish", () => {
   assert.match(refreshBody, /DragonBall%d/);
   assert.match(collectBody, /Feature\.teleportToBuharaObject\(ball\.instance, Config\.shenron\.ballCollectDistance\)/);
   assert.match(collectBody, /Feature\.touchInstance\(ball\.instance\)/);
+  assert.match(bestWishBody, /Feature\.dataGet\("SuperShenronWishes", 0\)/);
+  assert.match(bestWishBody, /Feature\.isBlockedShenronWish\(wishName\)/);
   assert.match(turnInBody, /Feature\.getShenronTurnInTarget\(\)/);
-  assert.match(turnInBody, /Remote\.fire\("SuperShenronClaimWish"\)/);
+  assert.match(turnInBody, /local wishName = Feature\.getBestShenronWish\(\)/);
+  assert.match(turnInBody, /Remote\.fire\("SuperShenronClaimWish", wishName\)/);
+  assert.doesNotMatch(turnInBody, /Remote\.fire\("SuperShenronClaimWish"\)/);
   assert.match(stepBody, /Feature\.shouldPauseShenronForAutoMerge\(\)/);
   assert.match(stepBody, /Feature\.getShenronDragonBalls\(\)/);
   assert.match(stepBody, /Feature\.turnInShenronDragonBalls\(\)/);

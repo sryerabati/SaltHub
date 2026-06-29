@@ -216,6 +216,18 @@ local Config = {
         maxScanItems = 450,
     },
     shenron = {
+        wishPriority = { "UniqueTrait", "ManyFragments", "MeteorRain", "LuckBoost", "SkipCraftingMachine", "SkipCloningMachine" },
+        blockedWishNames = { "MillionDollars", "CashBoost" },
+        wishRequirements = {
+            MillionDollars = 0,
+            MeteorRain = 0,
+            SkipCloningMachine = 1,
+            ManyFragments = 2,
+            SkipCraftingMachine = 3,
+            LuckBoost = 4,
+            CashBoost = 4,
+            UniqueTrait = 5,
+        },
         ballCollectDistance = 1.1,
         turnInDistance = 1.2,
         collectRetries = 3,
@@ -9493,6 +9505,30 @@ function Feature.runBoorusFightSupport()
     return true
 end
 
+function Feature.describeBoorusAvailability()
+    local spins = Feature.getBoorusSpinCount()
+    if spins > 0 then
+        return "Boorus: " .. tostring(spins) .. " spin(s) available."
+    end
+    if Feature.isBoorusChallengeActive() then
+        return "Boorus challenge active."
+    end
+    if Feature.isBoorusChallengeReady() then
+        return "Boorus challenge ready."
+    end
+
+    local statusText = Feature.getBoorusChallengeText()
+    if statusText ~= "" then
+        return "Boorus: " .. statusText
+    end
+
+    local lastChallenge = tonumber(Feature.dataGet("LastBeerusBossChallenge", 0)) or 0
+    if lastChallenge >= os.time() // 86400 then
+        return "Boorus challenge already completed today; waiting for reset."
+    end
+    return "Boorus waiting for challenge reset or spins."
+end
+
 function Feature.autoBoorusStep()
     if Feature.boorusSpinOnce() then
         return true
@@ -9504,12 +9540,15 @@ function Feature.autoBoorusStep()
         Feature.runBoorusFightSupport()
         return true
     end
+    State.boorusStatus = Feature.describeBoorusAvailability()
     return false
 end
 
 function Feature.toggleBoorus(value)
     Config.flags.autoBoorus = value
     if value then
+        State.boorusStatus = Feature.describeBoorusAvailability()
+        Log.push(State.boorusStatus)
         Feature.attachBoorusSpinComplete()
         Feature.startLoop("autoBoorus", function()
             if os.clock() < (tonumber(State.boorusSpinBusyUntil) or 0) then
@@ -10265,11 +10304,53 @@ function Feature.shouldPauseShenronForAutoMerge()
     return Config.flags.autoMerge == true
 end
 
+function Feature.getShenronWishRequirement(wishName)
+    local requirements = Config.shenron.wishRequirements or {}
+    return tonumber(requirements[tostring(wishName or "")]) or 0
+end
+
+function Feature.isBlockedShenronWish(wishName)
+    local clean = normalizeText(wishName)
+    if clean == "" then
+        return true
+    end
+    for _, blockedName in ipairs(Config.shenron.blockedWishNames or {}) do
+        if normalizeText(blockedName) == clean then
+            return true
+        end
+    end
+    return false
+end
+
+function Feature.isShenronWishUnlocked(wishName, wishesUsed)
+    return (tonumber(wishesUsed) or 0) >= Feature.getShenronWishRequirement(wishName)
+end
+
+function Feature.getBestShenronWish()
+    local wishesUsed = tonumber(Feature.dataGet("SuperShenronWishes", 0)) or 0
+    for _, wishName in ipairs(Config.shenron.wishPriority or {}) do
+        if type(wishName) == "string"
+            and wishName ~= ""
+            and not Feature.isBlockedShenronWish(wishName)
+            and Feature.isShenronWishUnlocked(wishName, wishesUsed) then
+            return wishName
+        end
+    end
+    return nil
+end
+
 function Feature.turnInShenronDragonBalls()
     local target = Feature.getShenronTurnInTarget()
     if not target then
         Feature.setShenronHoldBackoff("Shenron turn-in target is not visible yet.")
         State.shenronStatus = "Waiting for Shenron turn-in target."
+        return false
+    end
+
+    local wishName = Feature.getBestShenronWish()
+    if not wishName then
+        State.shenronStatus = "No unlocked non-cash Shenron wish is available."
+        Log.push(State.shenronStatus)
         return false
     end
 
@@ -10287,10 +10368,10 @@ function Feature.turnInShenronDragonBalls()
     end
 
     State.lastShenronClaimAt = os.clock()
-    local ok = Remote.fire("SuperShenronClaimWish")
+    local ok = Remote.fire("SuperShenronClaimWish", wishName)
     if ok then
         State.shenronCollectedSinceTurnIn = 0
-        State.shenronStatus = "Shenron wish claimed."
+        State.shenronStatus = "Shenron wish claimed: " .. tostring(wishName) .. "."
         Log.push(State.shenronStatus)
     else
         State.shenronStatus = "Shenron wish claim remote was not available."
