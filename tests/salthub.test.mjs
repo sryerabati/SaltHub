@@ -337,6 +337,8 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   const ballNameBody = source.match(/function Feature\.getShenronDragonBallName\(instance\)([\s\S]*?)function Feature\.getShenronCollectPrompt/)?.[1] ?? "";
   const refreshBody = source.match(/function Feature\.refreshShenronDragonBallCache\(\)([\s\S]*?)function Feature\.getShenronDragonBalls/)?.[1] ?? "";
   const collectBody = source.match(/function Feature\.collectShenronDragonBall\(ball\)([\s\S]*?)function Feature\.getShenronTurnInTarget/)?.[1] ?? "";
+  const actionableBody = source.match(/function Feature\.hasActionableShenronWork\(\)([\s\S]*?)function Feature\.shouldPauseShenronForAutoMerge/)?.[1] ?? "";
+  const pauseBody = source.match(/function Feature\.shouldPauseShenronForAutoMerge\(\)([\s\S]*?)function Feature\.getShenronWishRequirement/)?.[1] ?? "";
   const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.autoShenronStep/)?.[1] ?? "";
   const stepBody = source.match(/function Feature\.autoShenronStep\(\)([\s\S]*?)function Feature\.toggleShenron/)?.[1] ?? "";
   const toggleBody = source.match(/function Feature\.toggleShenron\(value\)([\s\S]*?)\nfunction Feature\.getBattlepassRewardModule/)?.[1] ?? "";
@@ -356,6 +358,7 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(source, /function Feature\.refreshShenronDragonBallCache/);
   assert.match(source, /function Feature\.collectShenronDragonBall/);
   assert.match(source, /function Feature\.getShenronTurnInTarget/);
+  assert.match(source, /function Feature\.hasActionableShenronWork/);
   assert.match(source, /function Feature\.getBestShenronWish/);
   assert.match(source, /function Feature\.turnInShenronDragonBalls/);
   assert.match(source, /function Feature\.autoShenronStep/);
@@ -372,8 +375,17 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(collectBody, /Feature\.getShenronCollectPrompt\(ball\.instance\)/);
   assert.match(collectBody, /Feature\.tryBuharaPrompt\(prompt\)/);
   assert.match(collectBody, /Feature\.touchInstance\(ball\.instance\)/);
+  assert.match(actionableBody, /Feature\.detectCarriedShenronDragonBall\(\)/);
+  assert.match(actionableBody, /State\.shenronCollectedSinceTurnIn/);
+  assert.match(actionableBody, /Feature\.getShenronDragonBalls\(\)/);
+  assert.match(pauseBody, /if Config\.flags\.autoMerge ~= true then/);
+  assert.match(pauseBody, /return not Feature\.hasActionableShenronWork\(\)/);
   assert.match(bestWishBody, /Feature\.dataGet\("SuperShenronWishes", 0\)/);
   assert.match(bestWishBody, /Feature\.isBlockedShenronWish\(wishName\)/);
+  assert.match(bestWishBody, /local bestRequirement = -math\.huge/);
+  assert.match(bestWishBody, /requirement > bestRequirement/);
+  assert.match(bestWishBody, /requirement == bestRequirement/);
+  assert.match(bestWishBody, /Feature\.getShenronWishPriorityRank\(wishName\)/);
   assert.match(turnInBody, /Feature\.getShenronTurnInTarget\(\)/);
   assert.match(turnInBody, /local wishName = Feature\.getBestShenronWish\(\)/);
   assert.match(turnInBody, /Remote\.fire\("SuperShenronClaimWish", wishName\)/);
@@ -384,6 +396,35 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(toggleBody, /Feature\.startLoop\("autoShenron", Feature\.getAutoShenronLoopDelay, Feature\.autoShenronStep\)/);
   assert.match(source, /UI\.toggle\(shenron, "Auto Shenron Collect and Wish"[\s\S]*?Feature\.toggleShenron/);
   assert.match(startupBody, /if Config\.flags\.autoShenron then\s+Feature\.toggleShenron\(true\)/);
+});
+
+test("auto Shenron collects meteor rain pickups after a meteor wish", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const refreshBody = source.match(/function Feature\.refreshShenronMeteorDropCache\(\)([\s\S]*?)function Feature\.getShenronMeteorDrops/)?.[1] ?? "";
+  const collectBody = source.match(/function Feature\.collectShenronMeteorDrop\(drop\)([\s\S]*?)function Feature\.collectShenronMeteorDrops/)?.[1] ?? "";
+  const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
+  const delayBody = source.match(/function Feature\.getAutoShenronLoopDelay\(\)([\s\S]*?)function Feature\.autoShenronStep/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoShenronStep\(\)([\s\S]*?)function Feature\.toggleShenron/)?.[1] ?? "";
+
+  assert.match(source, /local CollectionService = game:GetService\("CollectionService"\)/);
+  assert.match(source, /meteorCollectDistance = /);
+  assert.match(source, /meteorCollectWindow = /);
+  assert.match(source, /FragmentRainCollect = \{ "ReplicatedStorage", "Remotes", "FragmentRain", "Collect" \}/);
+  assert.match(source, /function Feature\.isShenronMeteorWish/);
+  assert.match(source, /function Feature\.startShenronMeteorCollectionWindow/);
+  assert.match(source, /function Feature\.isShenronMeteorCollectionActive/);
+  assert.match(source, /function Feature\.refreshShenronMeteorDropCache/);
+  assert.match(source, /function Feature\.collectShenronMeteorDrop/);
+  assert.match(source, /function Feature\.collectShenronMeteorDrops/);
+  assert.match(refreshBody, /CollectionService:GetTagged\("FragmentPickup"\)/);
+  assert.match(collectBody, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.shenron\.meteorCollectDistance\)/);
+  assert.match(collectBody, /Remote\.fire\("FragmentRainCollect", drop\.instance\)/);
+  assert.match(collectBody, /Feature\.touchInstance\(drop\.instance\)/);
+  assert.match(turnInBody, /Feature\.isShenronMeteorWish\(wishName\)/);
+  assert.match(turnInBody, /Feature\.startShenronMeteorCollectionWindow\(\)/);
+  assert.match(delayBody, /Feature\.isShenronMeteorCollectionActive\(\)/);
+  assert.match(stepBody, /Feature\.isShenronMeteorCollectionActive\(\)/);
+  assert.match(stepBody, /Feature\.collectShenronMeteorDrops\(\)/);
 });
 
 test("anti afk is enabled by default and user-toggleable in settings", () => {

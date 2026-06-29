@@ -7,6 +7,7 @@ local SaltHub = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
@@ -237,6 +238,9 @@ local Config = {
         holdLogInterval = 8.0,
         maxScanItems = 1800,
         claimCooldown = 3.0,
+        meteorCollectDistance = 4.5,
+        meteorCollectWindow = 45.0,
+        meteorCollectInterval = 0.35,
     },
     boorus = {
         promptDistance = 3.0,
@@ -377,6 +381,9 @@ end
 local function applyEventAutomationSafetyDefaults()
     Config.buhara.maxScanItems = math.max(tonumber(Config.buhara.maxScanItems) or 0, 450)
     Config.shenron.maxScanItems = math.max(tonumber(Config.shenron.maxScanItems) or 0, 1800)
+    Config.shenron.meteorCollectDistance = math.max(tonumber(Config.shenron.meteorCollectDistance) or 0, 4.5)
+    Config.shenron.meteorCollectWindow = math.max(tonumber(Config.shenron.meteorCollectWindow) or 0, 45.0)
+    Config.shenron.meteorCollectInterval = math.max(tonumber(Config.shenron.meteorCollectInterval) or 0, 0.35)
 end
 
 local workspaceConfigLoaded = false
@@ -914,6 +921,10 @@ local State = {
     shenronTurnInTarget = nil,
     shenronTurnInTargetScanAt = 0,
     shenronCollectedSinceTurnIn = 0,
+    shenronMeteorDrops = {},
+    shenronMeteorScanAt = 0,
+    shenronMeteorCollectUntil = 0,
+    lastShenronWishName = "",
     shenronHoldUntil = 0,
     lastShenronHoldLogAt = 0,
     lastShenronClaimAt = 0,
@@ -10360,8 +10371,25 @@ function Feature.clearShenronHoldBackoff()
     State.shenronHoldUntil = 0
 end
 
+function Feature.hasActionableShenronWork()
+    if Feature.detectCarriedShenronDragonBall() then
+        return true
+    end
+    if (tonumber(State.shenronCollectedSinceTurnIn) or 0) > 0 then
+        return true
+    end
+    if Feature.isShenronMeteorCollectionActive and Feature.isShenronMeteorCollectionActive() then
+        return true
+    end
+    local balls = Feature.getShenronDragonBalls()
+    return #balls > 0
+end
+
 function Feature.shouldPauseShenronForAutoMerge()
-    return Config.flags.autoMerge == true
+    if Config.flags.autoMerge ~= true then
+        return false
+    end
+    return not Feature.hasActionableShenronWork()
 end
 
 function Feature.getShenronWishRequirement(wishName)
@@ -10386,17 +10414,143 @@ function Feature.isShenronWishUnlocked(wishName, wishesUsed)
     return (tonumber(wishesUsed) or 0) >= Feature.getShenronWishRequirement(wishName)
 end
 
+function Feature.getShenronWishPriorityRank(wishName)
+    local clean = normalizeText(wishName)
+    if clean == "" then
+        return math.huge
+    end
+
+    for index, priorityName in ipairs(Config.shenron.wishPriority or {}) do
+        if normalizeText(priorityName) == clean then
+            return index
+        end
+    end
+    return math.huge
+end
+
 function Feature.getBestShenronWish()
     local wishesUsed = tonumber(Feature.dataGet("SuperShenronWishes", 0)) or 0
+    local candidates = {}
+    for wishName in pairs(Config.shenron.wishRequirements or {}) do
+        candidates[tostring(wishName)] = true
+    end
     for _, wishName in ipairs(Config.shenron.wishPriority or {}) do
+        if type(wishName) == "string" and wishName ~= "" then
+            candidates[wishName] = true
+        end
+    end
+
+    local bestWish = nil
+    local bestRequirement = -math.huge
+    local bestRank = math.huge
+    for wishName in pairs(candidates) do
         if type(wishName) == "string"
             and wishName ~= ""
             and not Feature.isBlockedShenronWish(wishName)
             and Feature.isShenronWishUnlocked(wishName, wishesUsed) then
-            return wishName
+            local requirement = Feature.getShenronWishRequirement(wishName)
+            local rank = Feature.getShenronWishPriorityRank(wishName)
+            if requirement > bestRequirement or (requirement == bestRequirement and rank < bestRank) then
+                bestWish = wishName
+                bestRequirement = requirement
+                bestRank = rank
+            end
         end
     end
-    return nil
+    return bestWish
+end
+
+function Feature.isShenronMeteorWish(wishName)
+    return normalizeText(wishName) == normalizeText("MeteorRain")
+end
+
+function Feature.startShenronMeteorCollectionWindow()
+    State.shenronMeteorCollectUntil = os.clock() + math.max(tonumber(Config.shenron.meteorCollectWindow) or 45.0, 5.0)
+    State.shenronMeteorScanAt = 0
+    State.shenronMeteorDrops = {}
+end
+
+function Feature.isShenronMeteorCollectionActive()
+    local untilTime = tonumber(State.shenronMeteorCollectUntil) or 0
+    if untilTime <= 0 then
+        return false
+    end
+    if untilTime <= os.clock() then
+        State.shenronMeteorCollectUntil = 0
+        State.shenronMeteorDrops = {}
+        return false
+    end
+    return true
+end
+
+function Feature.refreshShenronMeteorDropCache()
+    local root = Feature.getCharacterRoot()
+    local drops = {}
+    for _, instance in ipairs(CollectionService:GetTagged("FragmentPickup")) do
+        if instance
+            and instance.Parent
+            and instance:GetAttribute("Collected") ~= true then
+            local part = Feature.getTargetPart(instance)
+            if part and part:IsDescendantOf(workspace) then
+                local distance = root and (root.Position - part.Position).Magnitude or math.huge
+                table.insert(drops, {
+                    instance = instance,
+                    part = part,
+                    distance = distance,
+                })
+            end
+        end
+    end
+
+    table.sort(drops, function(left, right)
+        return (left.distance or math.huge) < (right.distance or math.huge)
+    end)
+    State.shenronMeteorDrops = drops
+    State.shenronMeteorScanAt = os.clock()
+    return drops
+end
+
+function Feature.getShenronMeteorDrops()
+    local now = os.clock()
+    local scanInterval = math.max(tonumber(Config.shenron.meteorCollectInterval) or 0.35, 0.1)
+    if type(State.shenronMeteorDrops) == "table" and now - (State.shenronMeteorScanAt or 0) < scanInterval then
+        return State.shenronMeteorDrops
+    end
+    return Feature.refreshShenronMeteorDropCache()
+end
+
+function Feature.collectShenronMeteorDrop(drop)
+    if not drop or not drop.instance or not drop.instance.Parent then
+        return false
+    end
+
+    Feature.teleportToBuharaObject(drop.instance, Config.shenron.meteorCollectDistance)
+    task.wait(0.06)
+    local ok = Remote.fire("FragmentRainCollect", drop.instance)
+    Feature.touchInstance(drop.instance)
+    task.wait(0.08)
+    State.shenronMeteorScanAt = 0
+    if ok then
+        State.shenronStatus = "Collected meteor drop."
+    else
+        State.shenronStatus = "Meteor collect remote was not available."
+    end
+    return ok
+end
+
+function Feature.collectShenronMeteorDrops()
+    if not Feature.isShenronMeteorCollectionActive() then
+        return false
+    end
+
+    local drops = Feature.getShenronMeteorDrops()
+    if #drops == 0 then
+        State.shenronStatus = "Waiting for meteor drops."
+        return false
+    end
+
+    State.shenronStatus = "Collecting meteor drop."
+    return Feature.collectShenronMeteorDrop(drops[1])
 end
 
 function Feature.turnInShenronDragonBalls()
@@ -10431,7 +10585,15 @@ function Feature.turnInShenronDragonBalls()
     local ok = Remote.fire("SuperShenronClaimWish", wishName)
     if ok then
         State.shenronCollectedSinceTurnIn = 0
-        State.shenronStatus = "Shenron wish claimed: " .. tostring(wishName) .. "."
+        State.lastShenronWishName = wishName
+        if Feature.isShenronMeteorWish(wishName) then
+            Feature.startShenronMeteorCollectionWindow()
+            State.shenronStatus = "Meteor wish claimed; collecting meteor drops."
+        else
+            State.shenronMeteorCollectUntil = 0
+            State.shenronMeteorDrops = {}
+            State.shenronStatus = "Shenron wish claimed: " .. tostring(wishName) .. "."
+        end
         Log.push(State.shenronStatus)
     else
         State.shenronStatus = "Shenron wish claim remote was not available."
@@ -10449,16 +10611,24 @@ function Feature.getAutoShenronLoopDelay()
     if holdUntil > now then
         return math.max(holdUntil - now, tonumber(Config.delays.event) or 1)
     end
+    if Feature.isShenronMeteorCollectionActive() then
+        return math.max(tonumber(Config.shenron.meteorCollectInterval) or 0.35, 0.1)
+    end
     return tonumber(Config.delays.event) or 1
 end
 
 function Feature.autoShenronStep()
     if Feature.shouldPauseShenronForAutoMerge() then
+        State.shenronStatus = "Paused while auto merge is active."
         return false
     end
 
     if Feature.detectCarriedShenronDragonBall() then
         return Feature.turnInShenronDragonBalls()
+    end
+
+    if Feature.isShenronMeteorCollectionActive() then
+        return Feature.collectShenronMeteorDrops()
     end
 
     local balls = Feature.getShenronDragonBalls()
