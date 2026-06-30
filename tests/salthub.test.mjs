@@ -370,7 +370,7 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(refreshBody, /Feature\.getShenronDragonBallName\(instance\)/);
   assert.match(refreshBody, /Feature\.getShenronCollectPrompt\(instance\)/);
   assert.match(refreshBody, /prompt = Feature\.getShenronCollectPrompt\(instance\)/);
-  assert.match(refreshBody, /DragonBall%d/);
+  assert.doesNotMatch(refreshBody, /tostring\(instance\.Name or ""\):match\("DragonBall%d"\)/);
   assert.match(collectBody, /Feature\.teleportToBuharaObject\(ball\.instance, Config\.shenron\.ballCollectDistance\)/);
   assert.match(collectBody, /Feature\.getShenronCollectPrompt\(ball\.instance\)/);
   assert.match(collectBody, /Feature\.tryBuharaPrompt\(prompt\)/);
@@ -396,6 +396,28 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(toggleBody, /Feature\.startLoop\("autoShenron", Feature\.getAutoShenronLoopDelay, Feature\.autoShenronStep\)/);
   assert.match(source, /UI\.toggle\(shenron, "Auto Shenron Collect and Wish"[\s\S]*?Feature\.toggleShenron/);
   assert.match(startupBody, /if Config\.flags\.autoShenron then\s+Feature\.toggleShenron\(true\)/);
+});
+
+test("auto Shenron ignores Dragonborn decoration dragon balls", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.getShenronDragonBallName/)?.[1] ?? "";
+  const ballNameBody = source.match(/function Feature\.getShenronDragonBallName\(instance\)([\s\S]*?)function Feature\.isShenronCollectPrompt/)?.[1] ?? "";
+  const promptBody = source.match(/function Feature\.getShenronCollectPrompt\(instance\)([\s\S]*?)function Feature\.refreshShenronDragonBallCache/)?.[1] ?? "";
+  const refreshBody = source.match(/function Feature\.refreshShenronDragonBallCache\(\)([\s\S]*?)function Feature\.getShenronDragonBalls/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.isShenronDecorationDragonBall/);
+  assert.match(source, /function Feature\.isMutationStuffsShenronDragonBallRoot/);
+  assert.match(source, /function Feature\.isShenronPromptScanBoundary/);
+  assert.match(source, /instance == workspace:FindFirstChild\("MutationStuffs"\)/);
+  assert.match(source, /instance == workspace:FindFirstChild\("ShenronDragonBalls"\)/);
+  assert.match(source, /textMatchesAny\(current\.Name, \{ "Design", "Decoration", "Decor", "Visual", "VFX", "Effect" \}\)/);
+  assert.match(scanRootsBody, /Feature\.isMutationStuffsShenronDragonBallRoot\(child\)/);
+  assert.doesNotMatch(scanRootsBody, /add\(mutationStuffs\)/);
+  assert.match(ballNameBody, /if mutationStuffs and instance:IsDescendantOf\(mutationStuffs\)[\s\S]*?not Feature\.isMutationStuffsShenronDragonBallRoot\(instance\)/);
+  assert.match(promptBody, /Feature\.isShenronPromptScanBoundary\(current\)/);
+  assert.match(promptBody, /Feature\.isShenronPromptScanBoundary\(current\.Parent\)/);
+  assert.match(refreshBody, /local ballName = Feature\.getShenronDragonBallName\(instance\)/);
+  assert.doesNotMatch(refreshBody, /tostring\(instance\.Name or ""\):match\("DragonBall%d"\)/);
 });
 
 test("auto Shenron collects meteor rain pickups after a meteor wish", () => {

@@ -10195,6 +10195,49 @@ function Feature.toggleBuhara(value)
     end
 end
 
+function Feature.isShenronDecorationDragonBall(instance)
+    local current = instance
+    while current and current ~= workspace do
+        if textMatchesAny(current.Name, { "Design", "Decoration", "Decor", "Visual", "VFX", "Effect" }) then
+            return true
+        end
+        current = current.Parent
+    end
+    return false
+end
+
+function Feature.getMutationStuffsShenronRoot(instance)
+    local mutationStuffs = workspace:FindFirstChild("MutationStuffs")
+    if not mutationStuffs or not instance or not instance:IsDescendantOf(mutationStuffs) then
+        return nil
+    end
+
+    local current = instance
+    while current and current.Parent and current.Parent ~= mutationStuffs do
+        current = current.Parent
+    end
+    if current and current.Parent == mutationStuffs then
+        return current
+    end
+    return nil
+end
+
+function Feature.isMutationStuffsShenronDragonBallRoot(instance)
+    local root = Feature.getMutationStuffsShenronRoot(instance)
+    if not root or Feature.isShenronDecorationDragonBall(root) then
+        return false
+    end
+
+    local rootName = tostring(root.Name or "")
+    local hasBallName = rootName:match("^Ball%d$")
+        or textMatchesAny(rootName, { "DragonBall", "Dragon Ball", "Shenron", "Super Dragon balls" })
+    if not hasBallName then
+        return false
+    end
+
+    return Feature.getShenronCollectPrompt(root) ~= nil
+end
+
 function Feature.getShenronScanRoots()
     local roots = {}
     local seen = {}
@@ -10210,12 +10253,10 @@ function Feature.getShenronScanRoots()
     local mutationStuffs = workspace:FindFirstChild("MutationStuffs")
     if mutationStuffs then
         for _, child in ipairs(mutationStuffs:GetChildren()) do
-            if tostring(child.Name or ""):match("^Ball%d$")
-                or textMatchesAny(child.Name, { "DragonBall", "Dragon Ball", "Shenron", "Super Dragon balls" }) then
+            if Feature.isMutationStuffsShenronDragonBallRoot(child) then
                 add(child)
             end
         end
-        add(mutationStuffs)
     end
     add(workspace:FindFirstChild("Debris"))
     add(workspace:FindFirstChild("Map"))
@@ -10229,6 +10270,12 @@ end
 
 function Feature.getShenronDragonBallName(instance)
     if not instance then
+        return nil
+    end
+
+    local mutationStuffs = workspace:FindFirstChild("MutationStuffs")
+    if mutationStuffs and instance:IsDescendantOf(mutationStuffs)
+        and not Feature.isMutationStuffsShenronDragonBallRoot(instance) then
         return nil
     end
 
@@ -10260,7 +10307,6 @@ function Feature.getShenronDragonBallName(instance)
         end
         local ballNumber = tostring(current.Name or ""):match("^Ball(%d)$")
         if ballNumber then
-            local mutationStuffs = workspace:FindFirstChild("MutationStuffs")
             local shenronDragonBalls = workspace:FindFirstChild("ShenronDragonBalls")
             local character = LocalPlayer.Character
             if (mutationStuffs and current.Parent == mutationStuffs)
@@ -10281,9 +10327,24 @@ function Feature.isShenronCollectPrompt(prompt)
     return textMatchesAny(prompt.ActionText, { "Collect", "Dragon" }) or textMatchesAny(prompt.Name, { "Collect", "Dragon", "Ball" })
 end
 
+function Feature.isShenronPromptScanBoundary(instance)
+    if not instance or instance == workspace then
+        return true
+    end
+    return instance == workspace:FindFirstChild("MutationStuffs")
+        or instance == workspace:FindFirstChild("EventAttachments")
+        or instance == workspace:FindFirstChild("ShenronDragonBalls")
+        or instance == workspace:FindFirstChild("Debris")
+        or instance == workspace:FindFirstChild("Map")
+end
+
 function Feature.getShenronCollectPrompt(instance)
     local current = instance
     while current and current ~= workspace do
+        if Feature.isShenronPromptScanBoundary(current) then
+            break
+        end
+
         if Feature.isShenronCollectPrompt(current) then
             return current
         end
@@ -10293,7 +10354,7 @@ function Feature.getShenronCollectPrompt(instance)
             return prompt
         end
 
-        if current.Parent == workspace then
+        if Feature.isShenronPromptScanBoundary(current.Parent) then
             break
         end
         current = current.Parent
@@ -10321,9 +10382,6 @@ function Feature.refreshShenronDragonBallCache()
 
             if instance:IsA("BasePart") or instance:IsA("Model") or instance:IsA("Tool") then
                 local ballName = Feature.getShenronDragonBallName(instance)
-                if not ballName then
-                    ballName = tostring(instance.Name or ""):match("DragonBall%d")
-                end
                 local targetPart = ballName and Feature.getTargetPart(instance) or nil
                 if ballName and targetPart and targetPart:IsDescendantOf(workspace) and not seen[targetPart] then
                     seen[targetPart] = true
