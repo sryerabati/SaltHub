@@ -219,6 +219,7 @@ local Config = {
     shenron = {
         wishPriority = { "UniqueTrait", "ManyFragments", "MeteorRain", "LuckBoost", "SkipCraftingMachine", "SkipCloningMachine" },
         blockedWishNames = { "MillionDollars", "CashBoost" },
+        doombringerSkipTraits = { "Omnipotent", "Corrupted", "Doombringer" },
         wishRequirements = {
             MillionDollars = 0,
             MeteorRain = 0,
@@ -10800,6 +10801,168 @@ function Feature.getBestShenronWish()
     return bestWish
 end
 
+function Feature.isShenronDoombringerWish(wishName)
+    local clean = normalizeText(wishName)
+    return clean == normalizeText("UniqueTrait")
+        or clean == normalizeText("Doombringer")
+        or clean == normalizeText("DoombringerTrait")
+end
+
+function Feature.computeUnitDoombringerTargetStats(unit)
+    local static = Feature.getCharacterStaticInfo(unit and unit.name)
+    local info = static and static.data
+    if type(info) ~= "table" then
+        return nil
+    end
+
+    local mutationInfo = Feature.getMutationInfo(unit.mutation)
+    local level = tonumber(unit.level) or 1
+    local mutationDamage = tonumber(mutationInfo and mutationInfo.DamageMultiplier) or 1
+    local baseDamage = Feature.getLevelDamage(info.Damage, level)
+    local hitDamage = baseDamage * mutationDamage
+    local totalDamage = hitDamage
+    local attackType = tostring(info.AttackType or "")
+
+    if attackType == "Barrage" or attackType == "Continuous" then
+        local duration = tonumber(info.Duration) or 0
+        local tickRate = tonumber(info.TickRate) or 0
+        if duration > 0 and tickRate > 0 then
+            totalDamage = hitDamage * math.max(1, math.floor(duration / tickRate + 0.0001))
+        end
+    end
+
+    if info.Burn then
+        local burnDuration = tonumber(info.BurnDuration) or 0
+        local burnDamage = tonumber(info.BurnDamage) or 0
+        local burnTick = tonumber(info.BurnTick) or 0
+        if burnDuration > 0 and burnDamage > 0 and burnTick > 0 then
+            totalDamage += burnDamage * math.max(1, math.floor(burnDuration / burnTick + 0.0001))
+        end
+    end
+
+    local cooldown = tonumber(info.Cooldown) or 0
+    local dps = cooldown > 0 and (math.floor(totalDamage / cooldown * 10 + 0.5) / 10) or 0
+    return {
+        damage = totalDamage,
+        dps = dps,
+        cooldown = cooldown,
+        level = level,
+        mutationDamage = mutationDamage,
+        displayName = static.displayName or unit.name,
+    }
+end
+
+function Feature.getUnitDoombringerTargetDps(unit)
+    local stats = Feature.computeUnitDoombringerTargetStats(unit)
+    return tonumber(stats and stats.dps) or 0
+end
+
+function Feature.isShenronDoombringerTargetTrait(traitName)
+    local clean = normalizeText(traitName)
+    for _, skipTrait in ipairs(Config.shenron.doombringerSkipTraits or {}) do
+        if normalizeText(skipTrait) == clean then
+            return false
+        end
+    end
+    return true
+end
+
+function Feature.getShenronDoombringerCandidates()
+    State.scanUnits()
+    local candidates = {}
+    for _, unit in ipairs(State.characters or {}) do
+        if unit
+            and not unit.crafting
+            and not unit.cloning
+            and Feature.isShenronDoombringerTargetTrait(unit.trait) then
+            local targetStats = Feature.computeUnitDoombringerTargetStats(unit)
+            if targetStats and (tonumber(targetStats.dps) or 0) > 0 then
+                table.insert(candidates, {
+                    unit = unit,
+                    targetStats = targetStats,
+                    targetDps = targetStats.dps,
+                })
+            end
+        end
+    end
+
+    table.sort(candidates, function(left, right)
+        local leftDps = tonumber(left and left.targetDps) or 0
+        local rightDps = tonumber(right and right.targetDps) or 0
+        if leftDps ~= rightDps then
+            return leftDps > rightDps
+        end
+
+        local leftDamage = tonumber(left and left.targetStats and left.targetStats.damage) or 0
+        local rightDamage = tonumber(right and right.targetStats and right.targetStats.damage) or 0
+        if leftDamage ~= rightDamage then
+            return leftDamage > rightDamage
+        end
+
+        local leftLevel = tonumber(left and left.unit and left.unit.level) or 0
+        local rightLevel = tonumber(right and right.unit and right.unit.level) or 0
+        if leftLevel ~= rightLevel then
+            return leftLevel > rightLevel
+        end
+
+        return tostring(left and left.unit and left.unit.name or "") < tostring(right and right.unit and right.unit.name or "")
+    end)
+    return candidates
+end
+
+function Feature.pickupShenronDoombringerPlacedUnit(unit)
+    if not unit or not unit.placed then
+        return true
+    end
+    return Feature.pickupUnitForMerge(unit)
+end
+
+function Feature.pickupShenronDoombringerUnits()
+    State.scanUnits()
+    local picked = 0
+    for _, unit in ipairs(State.characters or {}) do
+        if unit and unit.placed then
+            if Feature.pickupShenronDoombringerPlacedUnit(unit) then
+                picked += 1
+            end
+        end
+    end
+    if picked > 0 then
+        task.wait(math.max(Config.safety.remoteCooldown, 0.12))
+    end
+    State.scanUnits()
+    return true
+end
+
+function Feature.prepareShenronDoombringerWishTarget()
+    Feature.pickupShenronDoombringerUnits()
+    local candidates = Feature.getShenronDoombringerCandidates()
+    local candidate = candidates[1]
+    if not candidate or not candidate.unit then
+        State.shenronStatus = "No eligible Doombringer target unit found."
+        Log.push(State.shenronStatus)
+        return false
+    end
+
+    local unit = State.getUnitById(candidate.unit.id)
+    if not unit then
+        State.scanUnits()
+        unit = State.getUnitById(candidate.unit.id)
+    end
+    unit = unit or candidate.unit
+
+    if Feature.equipUnitForMerge(unit) then
+        local dpsText = tostring(math.floor((tonumber(candidate.targetDps) or 0) * 10 + 0.5) / 10)
+        State.shenronStatus = "Holding " .. tostring(unit.name) .. " for Doombringer (" .. dpsText .. " mutation DPS)."
+        Log.push(State.shenronStatus)
+        return true
+    end
+
+    State.shenronStatus = "Could not hold Doombringer target: " .. tostring(unit.name) .. "."
+    Log.push(State.shenronStatus)
+    return false
+end
+
 function Feature.isShenronMeteorWish(wishName)
     return normalizeText(wishName) == normalizeText("MeteorRain")
 end
@@ -10919,6 +11082,10 @@ function Feature.turnInShenronDragonBalls()
         task.wait(0.06)
         Feature.touchInstance(target)
         task.wait(0.12)
+    end
+
+    if Feature.isShenronDoombringerWish(wishName) and not Feature.prepareShenronDoombringerWishTarget() then
+        return false
     end
 
     State.lastShenronClaimAt = os.clock()

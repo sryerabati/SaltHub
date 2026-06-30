@@ -448,6 +448,57 @@ test("auto Shenron collects dragon balls and claims the best unlocked non-cash w
   assert.match(startupBody, /if Config\.flags\.autoShenron then\s+Feature\.toggleShenron\(true\)/);
 });
 
+test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doombringer", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const targetStatsBody = source.match(/function Feature\.computeUnitDoombringerTargetStats\(unit\)([\s\S]*?)\nfunction Feature\.getUnitDoombringerTargetDps/)?.[1] ?? "";
+  const eligibleBody = source.match(/function Feature\.isShenronDoombringerTargetTrait\(traitName\)([\s\S]*?)\nfunction Feature\.getShenronDoombringerCandidates/)?.[1] ?? "";
+  const candidatesBody = source.match(/function Feature\.getShenronDoombringerCandidates\(\)([\s\S]*?)\nfunction Feature\.pickupShenronDoombringerPlacedUnit/)?.[1] ?? "";
+  const pickupAllBody = source.match(/function Feature\.pickupShenronDoombringerUnits\(\)([\s\S]*?)\nfunction Feature\.prepareShenronDoombringerWishTarget/)?.[1] ?? "";
+  const prepareBody = source.match(/function Feature\.prepareShenronDoombringerWishTarget\(\)([\s\S]*?)\nfunction Feature\.isShenronMeteorWish/)?.[1] ?? "";
+  const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
+
+  assert.match(source, /doombringerSkipTraits = \{ "Omnipotent", "Corrupted", "Doombringer" \}/);
+  assert.match(source, /function Feature\.isShenronDoombringerWish/);
+  assert.match(source, /function Feature\.computeUnitDoombringerTargetStats/);
+  assert.match(source, /function Feature\.getUnitDoombringerTargetDps/);
+  assert.match(source, /function Feature\.isShenronDoombringerTargetTrait/);
+  assert.match(source, /function Feature\.getShenronDoombringerCandidates/);
+  assert.match(source, /function Feature\.pickupShenronDoombringerUnits/);
+  assert.match(source, /function Feature\.prepareShenronDoombringerWishTarget/);
+  assert.match(targetStatsBody, /Feature\.getCharacterStaticInfo\(unit and unit\.name\)/);
+  assert.match(targetStatsBody, /Feature\.getMutationInfo\(unit\.mutation\)/);
+  assert.match(targetStatsBody, /local mutationDamage = tonumber\(mutationInfo and mutationInfo\.DamageMultiplier\) or 1/);
+  assert.match(targetStatsBody, /Feature\.getLevelDamage\(info\.Damage, level\)/);
+  assert.match(targetStatsBody, /local hitDamage = baseDamage \* mutationDamage/);
+  assert.match(targetStatsBody, /local cooldown = tonumber\(info\.Cooldown\) or 0/);
+  assert.doesNotMatch(targetStatsBody, /Feature\.getTraitInfo/);
+  assert.doesNotMatch(targetStatsBody, /traitDamage/);
+  assert.doesNotMatch(targetStatsBody, /traitCooldown/);
+  assert.match(eligibleBody, /Config\.shenron\.doombringerSkipTraits/);
+  assert.match(eligibleBody, /normalizeText\(skipTrait\) == clean/);
+  assert.match(candidatesBody, /State\.scanUnits\(\)/);
+  assert.match(candidatesBody, /not unit\.crafting/);
+  assert.match(candidatesBody, /not unit\.cloning/);
+  assert.match(candidatesBody, /Feature\.isShenronDoombringerTargetTrait\(unit\.trait\)/);
+  assert.match(candidatesBody, /Feature\.computeUnitDoombringerTargetStats\(unit\)/);
+  assert.match(candidatesBody, /targetDps = targetStats\.dps/);
+  assert.match(candidatesBody, /table\.sort\(candidates/);
+  assert.match(candidatesBody, /return leftDps > rightDps/);
+  assert.match(pickupAllBody, /State\.scanUnits\(\)/);
+  assert.match(pickupAllBody, /unit\.placed/);
+  assert.match(pickupAllBody, /Feature\.pickupShenronDoombringerPlacedUnit\(unit\)/);
+  assert.match(prepareBody, /Feature\.pickupShenronDoombringerUnits\(\)/);
+  assert.match(prepareBody, /Feature\.getShenronDoombringerCandidates\(\)/);
+  assert.match(prepareBody, /State\.getUnitById\(candidate\.unit\.id\)/);
+  assert.match(prepareBody, /Feature\.equipUnitForMerge\(unit\)/);
+  assert.match(turnInBody, /Feature\.isShenronDoombringerWish\(wishName\)/);
+  assert.match(turnInBody, /Feature\.prepareShenronDoombringerWishTarget\(\)/);
+  assert.ok(
+    turnInBody.indexOf("Feature.prepareShenronDoombringerWishTarget()") < turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)'),
+    "Doombringer target must be held before ClaimWish fires",
+  );
+});
+
 test("auto Shenron ignores Dragonborn decoration dragon balls", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.getShenronDragonBallName/)?.[1] ?? "";
