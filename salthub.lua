@@ -220,6 +220,10 @@ local Config = {
         wishPriority = { "UniqueTrait", "ManyFragments", "MeteorRain", "LuckBoost", "SkipCraftingMachine", "SkipCloningMachine" },
         blockedWishNames = { "MillionDollars", "CashBoost" },
         doombringerSkipTraits = { "Omnipotent", "Corrupted", "Doombringer" },
+        useLuckPotions = true,
+        luckPotionName = "Luck Potion",
+        luckPotionBoostType = "Luck",
+        luckPotionEventNames = { "SuperShenron" },
         wishRequirements = {
             MillionDollars = 0,
             MeteorRain = 0,
@@ -783,6 +787,7 @@ local Remote = {
         BuharaDropFood = { "ReplicatedStorage", "Remotes", "BuharaEvent", "DropFood" },
         BuharaMessage = { "ReplicatedStorage", "Remotes", "BuharaEvent", "CreateBuharaMessage" },
         SuperShenronClaimWish = { "ReplicatedStorage", "Remotes", "SuperShenronEvent", "ClaimWish" },
+        UsePotion = { "ReplicatedStorage", "Remotes", "Items", "UsePotion" },
         CharacterLock = { "ReplicatedStorage", "Remotes", "Characters", "UpdateCharacterLock" },
         PickupCharacter = { "ReplicatedStorage", "Remotes", "Characters", "PickupCharacter" },
         MoveCharacter = { "ReplicatedStorage", "Remotes", "Characters", "MoveCharacter" },
@@ -929,6 +934,8 @@ local State = {
     shenronHoldUntil = 0,
     lastShenronHoldLogAt = 0,
     lastShenronClaimAt = 0,
+    lastShenronLuckPotionAt = 0,
+    lastShenronLuckPotionLogAt = 0,
     battlepassStatus = "Waiting for data.",
     vipRewardStatus = "Waiting for data.",
     waveStatus = "-",
@@ -3957,25 +3964,26 @@ function Feature.getTraitMap()
     return {}
 end
 
-function Feature.getTraitShardAmount()
-    local client = Feature.getDataClient()
-    if not client or not client.get then
+function Feature.getItemQuantityByName(itemName)
+    local target = normalizeText(itemName)
+    if target == "" then
         return 0
     end
 
-    local ok, items = pcall(function()
-        return client:get("Items")
-    end)
-    if not ok or type(items) ~= "table" then
+    local items = Feature.dataGet("Items", {})
+    if type(items) ~= "table" then
         return 0
     end
-
     for _, item in pairs(items) do
-        if type(item) == "table" and normalizeText(item.Name or item.ItemName or item.ID) == "trait shard" then
-            return tonumber(item.Quantity or item.Amount or item.Count or item.Value) or 0
+        if type(item) == "table" and normalizeText(item.Name or item.ItemName or item.ID) == target then
+            return tonumber(item.Quantity or item.Quanity or item.Amount or item.Count or item.Value) or 0
         end
     end
     return 0
+end
+
+function Feature.getTraitShardAmount()
+    return Feature.getItemQuantityByName("Trait Shard")
 end
 
 function Feature.getSelectedTraitUnit()
@@ -5587,26 +5595,30 @@ function Feature.attachEventUiTracker()
     end
 end
 
-function Feature.scanSelectedEventText()
-    local selectedEvents = Feature.getSelectedSnipeEvents()
+function Feature.scanEventTextForNames(eventNames)
+    eventNames = DataSource.expandSnipeEventNames(eventNames or {})
+    if not listHasItems(eventNames) then
+        return ""
+    end
+
     local roots = {
         PlayerGui:FindFirstChild("EventUI"),
         workspace:FindFirstChild("EventAttachments"),
     }
     for _, root in ipairs(roots) do
         if root then
-            if textMatchesAny(root.Name, selectedEvents) then
+            if textMatchesAny(root.Name, eventNames) then
                 return root.Name
             end
             for _, descendant in ipairs(root:GetDescendants()) do
-                if Feature.isVisibleSelectedEventBadge(descendant, selectedEvents) then
+                if Feature.isVisibleSelectedEventBadge(descendant, eventNames) then
                     return descendant.Name
                 end
                 local text = descendant.Name
                 if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
                     text = tostring(descendant.Text) .. " " .. tostring(descendant.Name)
                 end
-                if textMatchesAny(text, selectedEvents) and Feature.isEventStatusText(text) then
+                if textMatchesAny(text, eventNames) and Feature.isEventStatusText(text) then
                     return text
                 end
             end
@@ -5615,12 +5627,16 @@ function Feature.scanSelectedEventText()
     return ""
 end
 
-function Feature.textRootHasSelectedEvent(root)
+function Feature.scanSelectedEventText()
+    return Feature.scanEventTextForNames(Feature.getSelectedSnipeEvents())
+end
+
+function Feature.textRootHasSelectedEvent(root, selectedEvents)
     if not root then
         return false
     end
 
-    local selectedEvents = Feature.getSelectedSnipeEvents()
+    selectedEvents = selectedEvents or Feature.getSelectedSnipeEvents()
     local sawSelectedName = textMatchesAny(root.Name, selectedEvents)
     local sawStatus = false
     for _, descendant in ipairs(root:GetDescendants()) do
@@ -10801,6 +10817,213 @@ function Feature.getBestShenronWish()
     return bestWish
 end
 
+function Feature.getShenronLuckPotionEventNames()
+    return Config.shenron.luckPotionEventNames or { "SuperShenron" }
+end
+
+function Feature.isSuperShenronEventActive()
+    local eventNames = DataSource.expandSnipeEventNames(Feature.getShenronLuckPotionEventNames())
+    if not listHasItems(eventNames) then
+        return false
+    end
+
+    if State.activeEventText ~= ""
+        and os.clock() - (State.lastEventUiAt or 0) < 180
+        and textMatchesAny(State.activeEventText, eventNames)
+        and Feature.isSelectedEventPayloadText(State.activeEventText, eventNames) then
+        return true
+    end
+
+    local eventText = Feature.scanEventTextForNames(eventNames)
+    if eventText ~= "" then
+        State.activeEventText = eventText
+        State.lastEventUiAt = os.clock()
+        return true
+    end
+
+    State.scanGuiText()
+    if Feature.isEventStatusText(State.waveStatus) and textMatchesAny(State.waveStatus, eventNames) then
+        return true
+    end
+
+    local main = PlayerGui:FindFirstChild("MainUI")
+    local frames = main and main:FindFirstChild("Frames")
+    if Feature.textRootHasSelectedEvent(frames and frames:FindFirstChild("Events"), eventNames) then
+        return true
+    end
+
+    local plot = Feature.getOwnedPlot()
+    local roll = plot and plot:FindFirstChild("Roll")
+    local rollButton = roll and roll:FindFirstChild("RollButton")
+    if Feature.textRootHasSelectedEvent(rollButton and rollButton:FindFirstChild("Luck"), eventNames) then
+        return true
+    end
+
+    return false
+end
+
+function Feature.getPotionInfoByName(potionName)
+    local name = tostring(potionName or "")
+    if name == "" then
+        return nil
+    end
+
+    if Feature.potionInfo == nil then
+        local modules = ReplicatedStorage:FindFirstChild("Modules")
+        local shared = modules and modules:FindFirstChild("Shared")
+        Feature.potionInfo = DataSource.safeRequire(shared and shared:FindFirstChild("PotionInfo"), 1)
+            or DataSource.safeRequire(modules and modules:FindFirstChild("PotionInfo"), 1)
+            or false
+    end
+
+    local loaded = Feature.potionInfo
+    if type(loaded) ~= "table" then
+        return nil
+    end
+
+    local potions = loaded.Potions or loaded.potions or loaded
+    if type(potions) ~= "table" then
+        return nil
+    end
+
+    local exact = potions[name]
+    if type(exact) == "table" then
+        return exact
+    end
+
+    local clean = normalizeText(name)
+    local lookup = normalizedLookupKey(name)
+    for potionNameKey, info in pairs(potions) do
+        if type(info) == "table"
+            and (normalizeText(potionNameKey) == clean or normalizedLookupKey(potionNameKey) == lookup) then
+            return info
+        end
+    end
+    return nil
+end
+
+function Feature.getPotionDuration(potionName)
+    local info = Feature.getPotionInfoByName(potionName)
+    return math.max(tonumber(info and info.Duration) or 300, 5)
+end
+
+function Feature.valueHasActivePotionBoost(value, boostType, potionName, depth)
+    if type(value) ~= "table" then
+        return false
+    end
+    depth = tonumber(depth) or 0
+    if depth > 4 then
+        return false
+    end
+
+    local targetBoost = normalizeText(boostType)
+    local targetPotion = normalizeText(potionName)
+    local targetPotionLookup = normalizedLookupKey(potionName)
+    local nowClock = os.clock()
+    local nowUnix = os.time()
+
+    local function matchesText(text)
+        local clean = normalizeText(text)
+        if clean == "" then
+            return false
+        end
+        if targetBoost ~= "" and (clean == targetBoost or clean:find(targetBoost, 1, true)) then
+            return true
+        end
+        if targetPotion ~= "" and (clean == targetPotion or clean:find(targetPotion, 1, true)) then
+            return true
+        end
+        return targetPotionLookup ~= "" and normalizedLookupKey(text) == targetPotionLookup
+    end
+
+    local function isTimedEntryActive(entry)
+        if type(entry) ~= "table" then
+            return entry == true or (type(entry) == "number" and entry > 0) or (type(entry) == "string" and entry ~= "")
+        end
+
+        if entry.Active == false or entry.Enabled == false or entry.Disabled == true then
+            return false
+        end
+
+        local remaining = tonumber(entry.TimeLeft or entry.Remaining or entry.DurationLeft or entry.SecondsLeft or entry.Value)
+        if remaining ~= nil and remaining <= 0 then
+            return false
+        end
+
+        local expiresAt = tonumber(entry.ExpiresAt or entry.ExpireAt or entry.EndTime or entry.Until or entry.EndsAt)
+        if expiresAt ~= nil then
+            if expiresAt > 1000000 then
+                return expiresAt > nowUnix
+            end
+            return expiresAt > nowClock
+        end
+
+        return true
+    end
+
+    for key, item in pairs(value) do
+        local matched = matchesText(key)
+        if type(item) == "table" then
+            local entryText = tostring(item.Name or item.PotionName or item.ID or item.Id or item.BoostType or item.Type or item.Boost or "")
+            matched = matched or matchesText(entryText)
+            if matched and isTimedEntryActive(item) then
+                return true
+            end
+            if Feature.valueHasActivePotionBoost(item, boostType, potionName, depth + 1) then
+                return true
+            end
+        elseif matched and isTimedEntryActive(item) then
+            return true
+        end
+    end
+    return false
+end
+
+function Feature.isLuckPotionActive()
+    local potionName = tostring(Config.shenron.luckPotionName or "Luck Potion")
+    local duration = Feature.getPotionDuration(potionName)
+    if (tonumber(State.lastShenronLuckPotionAt) or 0) > 0
+        and os.clock() - State.lastShenronLuckPotionAt < duration then
+        return true
+    end
+
+    local boosts = Feature.dataGet("PotionBoosts", {})
+    return Feature.valueHasActivePotionBoost(boosts, Config.shenron.luckPotionBoostType or "Luck", potionName, 0)
+end
+
+function Feature.useLuckPotionForSuperShenronIfReady()
+    if Config.shenron.useLuckPotions ~= true then
+        return false
+    end
+    if not Feature.isSuperShenronEventActive() then
+        return false
+    end
+    if Feature.isLuckPotionActive() then
+        return false
+    end
+
+    local potionName = tostring(Config.shenron.luckPotionName or "Luck Potion")
+    if Feature.getItemQuantityByName(potionName) <= 0 then
+        local now = os.clock()
+        if now - (State.lastShenronLuckPotionLogAt or 0) >= 20 then
+            State.lastShenronLuckPotionLogAt = now
+            State.shenronStatus = "No Luck Potion available for Super Shenron."
+            Log.push(State.shenronStatus)
+        end
+        return false
+    end
+
+    local ok = Remote.fire("UsePotion", potionName)
+    if ok then
+        State.lastShenronLuckPotionAt = os.clock()
+        State.shenronStatus = "Used Luck Potion for Super Shenron event."
+        Log.push(State.shenronStatus)
+    else
+        State.shenronStatus = "Luck Potion use remote was not available."
+    end
+    return ok
+end
+
 function Feature.isShenronDoombringerWish(wishName)
     local clean = normalizeText(wishName)
     return clean == normalizeText("UniqueTrait")
@@ -11125,6 +11348,10 @@ function Feature.getAutoShenronLoopDelay()
 end
 
 function Feature.autoShenronStep()
+    if Feature.useLuckPotionForSuperShenronIfReady() then
+        return true
+    end
+
     if Feature.shouldPauseShenronForAutoMerge() then
         State.shenronStatus = "Paused while auto merge is active."
         return false

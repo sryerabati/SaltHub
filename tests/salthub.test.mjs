@@ -499,6 +499,58 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   );
 });
 
+test("auto Shenron uses Luck Potions only for the Super Shenron event", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const shenronConfigBody = source.match(/shenron = \{([\s\S]*?)\n    \},\n    boorus =/)?.[1] ?? "";
+  const itemQuantityBody = source.match(/function Feature\.getItemQuantityByName\(itemName\)([\s\S]*?)\nfunction Feature\.getTraitShardAmount/)?.[1] ?? "";
+  const scanNamesBody = source.match(/function Feature\.scanEventTextForNames\(eventNames\)([\s\S]*?)\nfunction Feature\.scanSelectedEventText/)?.[1] ?? "";
+  const selectedScanBody = source.match(/function Feature\.scanSelectedEventText\(\)([\s\S]*?)\nfunction Feature\.textRootHasSelectedEvent/)?.[1] ?? "";
+  const textRootBody = source.match(/function Feature\.textRootHasSelectedEvent\(root, selectedEvents\)([\s\S]*?)\nfunction Feature\.isSelectedSnipeEventActive/)?.[1] ?? "";
+  const shenronEventBody = source.match(/function Feature\.isSuperShenronEventActive\(\)([\s\S]*?)\nfunction Feature\.getPotionInfoByName/)?.[1] ?? "";
+  const potionActiveBody = source.match(/function Feature\.isLuckPotionActive\(\)([\s\S]*?)\nfunction Feature\.useLuckPotionForSuperShenronIfReady/)?.[1] ?? "";
+  const usePotionBody = source.match(/function Feature\.useLuckPotionForSuperShenronIfReady\(\)([\s\S]*?)\nfunction Feature\.isShenronDoombringerWish/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoShenronStep\(\)([\s\S]*?)function Feature\.toggleShenron/)?.[1] ?? "";
+
+  assert.match(source, /UsePotion = \{ "ReplicatedStorage", "Remotes", "Items", "UsePotion" \}/);
+  assert.match(shenronConfigBody, /useLuckPotions = true/);
+  assert.match(shenronConfigBody, /luckPotionName = "Luck Potion"/);
+  assert.match(shenronConfigBody, /luckPotionBoostType = "Luck"/);
+  assert.match(shenronConfigBody, /luckPotionEventNames = \{ "SuperShenron" \}/);
+  assert.match(source, /lastShenronLuckPotionAt = 0/);
+  assert.match(source, /function Feature\.getItemQuantityByName/);
+  assert.match(itemQuantityBody, /Feature\.dataGet\("Items", \{\}\)/);
+  assert.match(itemQuantityBody, /normalizeText\(item\.Name or item\.ItemName or item\.ID\) == target/);
+  assert.match(itemQuantityBody, /item\.Quantity or item\.Quanity or item\.Amount or item\.Count or item\.Value/);
+  assert.match(source, /function Feature\.getShenronLuckPotionEventNames/);
+  assert.match(source, /function Feature\.scanEventTextForNames/);
+  assert.match(scanNamesBody, /Feature\.isVisibleSelectedEventBadge\(descendant, eventNames\)/);
+  assert.match(selectedScanBody, /return Feature\.scanEventTextForNames\(Feature\.getSelectedSnipeEvents\(\)\)/);
+  assert.match(textRootBody, /selectedEvents = selectedEvents or Feature\.getSelectedSnipeEvents\(\)/);
+  assert.match(shenronEventBody, /Feature\.getShenronLuckPotionEventNames\(\)/);
+  assert.match(shenronEventBody, /DataSource\.expandSnipeEventNames/);
+  assert.match(shenronEventBody, /Feature\.scanEventTextForNames\(eventNames\)/);
+  assert.match(shenronEventBody, /Feature\.textRootHasSelectedEvent\(frames and frames:FindFirstChild\("Events"\), eventNames\)/);
+  assert.match(shenronEventBody, /Feature\.textRootHasSelectedEvent\(rollButton and rollButton:FindFirstChild\("Luck"\), eventNames\)/);
+  assert.match(source, /function Feature\.getPotionInfoByName/);
+  assert.match(potionActiveBody, /State\.lastShenronLuckPotionAt/);
+  assert.match(potionActiveBody, /Feature\.dataGet\("PotionBoosts", \{\}\)/);
+  assert.match(potionActiveBody, /Feature\.valueHasActivePotionBoost/);
+  assert.match(usePotionBody, /Config\.shenron\.useLuckPotions ~= true/);
+  assert.match(usePotionBody, /Feature\.isSuperShenronEventActive\(\)/);
+  assert.match(usePotionBody, /Feature\.isLuckPotionActive\(\)/);
+  assert.match(usePotionBody, /Feature\.getItemQuantityByName\(potionName\) <= 0/);
+  assert.match(usePotionBody, /Remote\.fire\("UsePotion", potionName\)/);
+  assert.match(usePotionBody, /State\.lastShenronLuckPotionAt = os\.clock\(\)/);
+  assert.ok(
+    stepBody.indexOf("Feature.useLuckPotionForSuperShenronIfReady()") < stepBody.indexOf("Feature.shouldPauseShenronForAutoMerge()"),
+    "Luck potion should still run before auto merge pauses Shenron collection",
+  );
+  assert.ok(
+    stepBody.indexOf("Feature.useLuckPotionForSuperShenronIfReady()") < stepBody.indexOf("Feature.detectCarriedShenronDragonBall()"),
+    "Luck potion should be considered before collecting or claiming Super Shenron work",
+  );
+});
+
 test("auto Shenron ignores Dragonborn decoration dragon balls", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.getShenronDragonBallName/)?.[1] ?? "";
@@ -1173,7 +1225,7 @@ test("trait reroll uses game trait data and the native roll contract", () => {
   assert.match(source, /function Feature\.autoTraitStep/);
   assert.match(source, /function textEqualsAny/);
   assert.match(source, /client:get\("Traits"\)/);
-  assert.match(source, /client:get\("Items"\)/);
+  assert.match(source, /Feature\.dataGet\("Items", \{\}\)/);
   assert.match(source, /client:get\("Cloning"\)/);
   assert.match(source, /Remote\.fire\("TraitRequest", action, \{ CharacterId = unit\.id \}\)/);
   assert.match(source, /local action = Feature\.shouldUseConfirmedTraitRoll\(unit\) and "ConfirmedRoll" or "Roll"/);
