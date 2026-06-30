@@ -299,7 +299,8 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(source, /function Feature\.describeBoorusAvailability/);
   assert.match(source, /function Feature\.autoBoorusStep/);
   assert.match(source, /function Feature\.toggleBoorus/);
-  assert.match(readyBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
+  assert.match(readyBody, /Feature\.isBoorusChallengeStatusReady\(\)/);
+  assert.match(readyBody, /Feature\.getBoorusLastChallengeDay\(\)/);
   assert.match(readyBody, /os\.time\(\) \/\/ 86400/);
   assert.match(activeBody, /workspace:FindFirstChild\("MutationStuffs"\)/);
   assert.match(activeBody, /FindFirstChild\("BeerusMap"\)/);
@@ -328,6 +329,30 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(toggleBody, /Feature\.startLoop\("autoBoorus"/);
   assert.match(source, /UI\.toggle\(boorus, "Auto Boorus"[\s\S]*?Feature\.toggleBoorus/);
   assert.match(startupBody, /if Config\.flags\.autoBoorus then\s+Feature\.toggleBoorus\(true\)/);
+});
+
+test("auto Boorus trusts visible challenge availability over stale challenge data", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const lastDayBody = source.match(/function Feature\.getBoorusLastChallengeDay\(\)([\s\S]*?)\nfunction Feature\.isBoorusChallengeStatusReady/)?.[1] ?? "";
+  const statusReadyBody = source.match(/function Feature\.isBoorusChallengeStatusReady\(\)([\s\S]*?)\nfunction Feature\.isBoorusChallengeReady/)?.[1] ?? "";
+  const readyBody = source.match(/function Feature\.isBoorusChallengeReady\(\)([\s\S]*?)\nfunction Feature\.shouldPauseWaveStartForBoorus/)?.[1] ?? "";
+  const describeBody = source.match(/function Feature\.describeBoorusAvailability\(\)([\s\S]*?)\nfunction Feature\.autoBoorusStep/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.getBoorusLastChallengeDay/);
+  assert.match(source, /function Feature\.isBoorusChallengeStatusReady/);
+  assert.match(lastDayBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
+  assert.match(lastDayBody, /86400000/);
+  assert.match(lastDayBody, /86400/);
+  assert.match(statusReadyBody, /Feature\.getBoorusChallengeText\(\)/);
+  assert.match(statusReadyBody, /challenge now/);
+  assert.match(readyBody, /local statusReady = Feature\.isBoorusChallengeStatusReady\(\)/);
+  assert.ok(
+    readyBody.indexOf("if statusReady then") < readyBody.indexOf("local lastChallengeDay = Feature.getBoorusLastChallengeDay()"),
+    "visible challenge-now text should win before checking stale LastBeerusBossChallenge data",
+  );
+  assert.match(readyBody, /return lastChallengeDay <= 0 or lastChallengeDay < today/);
+  assert.match(describeBody, /Feature\.getBoorusLastChallengeDay\(\)/);
+  assert.doesNotMatch(describeBody, /tonumber\(Feature\.dataGet\("LastBeerusBossChallenge", 0\)\)/);
 });
 
 test("auto Shenron collects dragon balls and claims the best unlocked non-cash wish", () => {

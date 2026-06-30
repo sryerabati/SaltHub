@@ -9557,15 +9557,35 @@ function Feature.getBoorusChallengeText()
     return ""
 end
 
-function Feature.isBoorusChallengeReady()
+function Feature.getBoorusLastChallengeDay()
     local lastChallenge = tonumber(Feature.dataGet("LastBeerusBossChallenge", 0)) or 0
-    local today = os.time() // 86400
-    if lastChallenge < today then
+    if lastChallenge <= 0 then
+        return 0
+    end
+    if lastChallenge >= 100000000000 then
+        return math.floor(lastChallenge / 86400000)
+    end
+    if lastChallenge >= 1000000000 then
+        return math.floor(lastChallenge / 86400)
+    end
+    return math.floor(lastChallenge)
+end
+
+function Feature.isBoorusChallengeStatusReady()
+    local statusText = normalizeText(Feature.getBoorusChallengeText())
+    return statusText:find("challenge now", 1, true) ~= nil
+        or statusText:find("ready", 1, true) ~= nil
+end
+
+function Feature.isBoorusChallengeReady()
+    local statusReady = Feature.isBoorusChallengeStatusReady()
+    if statusReady then
         return true
     end
 
-    local statusText = normalizeText(Feature.getBoorusChallengeText())
-    return lastChallenge <= 0 and statusText:find("challenge now", 1, true) ~= nil
+    local lastChallengeDay = Feature.getBoorusLastChallengeDay()
+    local today = os.time() // 86400
+    return lastChallengeDay <= 0 or lastChallengeDay < today
 end
 
 function Feature.shouldPauseWaveStartForBoorus()
@@ -9732,8 +9752,8 @@ function Feature.describeBoorusAvailability()
         return "Boorus: " .. statusText
     end
 
-    local lastChallenge = tonumber(Feature.dataGet("LastBeerusBossChallenge", 0)) or 0
-    if lastChallenge >= os.time() // 86400 then
+    local lastChallengeDay = Feature.getBoorusLastChallengeDay()
+    if lastChallengeDay >= os.time() // 86400 then
         return "Boorus challenge already completed today; waiting for reset."
     end
     return "Boorus waiting for challenge reset or spins."
