@@ -9557,18 +9557,26 @@ function Feature.getBoorusChallengeText()
     return ""
 end
 
-function Feature.getBoorusLastChallengeDay()
+function Feature.getCurrentBoorusChallengePeriod()
+    return os.time() // 43200
+end
+
+function Feature.getBoorusLastChallengePeriod()
     local lastChallenge = tonumber(Feature.dataGet("LastBeerusBossChallenge", 0)) or 0
     if lastChallenge <= 0 then
         return 0
     end
     if lastChallenge >= 100000000000 then
-        return math.floor(lastChallenge / 86400000)
+        return math.floor(lastChallenge / 43200000)
     end
     if lastChallenge >= 1000000000 then
-        return math.floor(lastChallenge / 86400)
+        return math.floor(lastChallenge / 43200)
     end
     return math.floor(lastChallenge)
+end
+
+function Feature.getBoorusLastChallengeDay()
+    return Feature.getBoorusLastChallengePeriod()
 end
 
 function Feature.isBoorusChallengeStatusReady()
@@ -9583,9 +9591,9 @@ function Feature.isBoorusChallengeReady()
         return true
     end
 
-    local lastChallengeDay = Feature.getBoorusLastChallengeDay()
-    local today = os.time() // 86400
-    return lastChallengeDay <= 0 or lastChallengeDay < today
+    local lastChallengePeriod = Feature.getBoorusLastChallengePeriod()
+    local currentPeriod = Feature.getCurrentBoorusChallengePeriod()
+    return lastChallengePeriod <= 0 or lastChallengePeriod < currentPeriod
 end
 
 function Feature.shouldPauseWaveStartForBoorus()
@@ -9606,6 +9614,55 @@ function Feature.waitForBoorusChallengeActive(timeout)
         task.wait(0.15)
     until os.clock() >= deadline
     return Feature.isBoorusChallengeActive()
+end
+
+function Feature.getBoorusChallengeStartSnapshot()
+    return {
+        statusReady = Feature.isBoorusChallengeStatusReady(),
+        lastPeriod = Feature.getBoorusLastChallengePeriod(),
+        currentPeriod = Feature.getCurrentBoorusChallengePeriod(),
+        spins = Feature.getBoorusSpinCount(),
+    }
+end
+
+function Feature.getBoorusChallengeAcceptance(snapshot)
+    snapshot = type(snapshot) == "table" and snapshot or {}
+    if Feature.isBoorusChallengeActive() then
+        return true, "active"
+    end
+
+    local lastPeriod = Feature.getBoorusLastChallengePeriod()
+    local currentPeriod = Feature.getCurrentBoorusChallengePeriod()
+    local previousPeriod = tonumber(snapshot.lastPeriod) or 0
+    if lastPeriod > previousPeriod and lastPeriod >= currentPeriod then
+        return true, "period"
+    end
+
+    if snapshot.statusReady and not Feature.isBoorusChallengeStatusReady() then
+        local statusText = Feature.getBoorusChallengeText()
+        if statusText ~= "" then
+            return true, "timer"
+        end
+    end
+
+    local previousSpins = tonumber(snapshot.spins) or 0
+    if Feature.getBoorusSpinCount() > previousSpins then
+        return true, "spin"
+    end
+
+    return false, "waiting"
+end
+
+function Feature.waitForBoorusChallengeAccepted(timeout, snapshot)
+    local deadline = os.clock() + math.max(tonumber(timeout) or 4, 1)
+    repeat
+        local accepted, reason = Feature.getBoorusChallengeAcceptance(snapshot)
+        if accepted then
+            return accepted, reason
+        end
+        task.wait(0.15)
+    until os.clock() >= deadline
+    return Feature.getBoorusChallengeAcceptance(snapshot)
 end
 
 function Feature.disableAutoSkipForBoorus()
@@ -9656,11 +9713,20 @@ function Feature.startBoorusChallengeIfReady()
     end
 
     State.lastBoorusChallengeStartAt = now
+    local startSnapshot = Feature.getBoorusChallengeStartSnapshot()
     local moved = Feature.moveToPromptNaturally(prompt, Config.boorus.promptDistance)
     local prompted = moved and Feature.holdPromptNaturally(prompt)
-    if prompted and Feature.waitForBoorusChallengeActive(Config.boorus.startConfirmTimeout) then
-        State.boorusFightUntil = os.clock() + math.max(tonumber(Config.boorus.fightSupportWindow) or 600, 60)
-        State.boorusStatus = "Boorus challenge started."
+    local accepted, acceptedReason = false, "waiting"
+    if prompted then
+        accepted, acceptedReason = Feature.waitForBoorusChallengeAccepted(Config.boorus.startConfirmTimeout, startSnapshot)
+    end
+    if prompted and accepted then
+        if acceptedReason == "active" then
+            State.boorusFightUntil = os.clock() + math.max(tonumber(Config.boorus.fightSupportWindow) or 600, 60)
+            State.boorusStatus = "Boorus challenge started."
+        else
+            State.boorusStatus = "Boorus challenge accepted; waiting for spin reward."
+        end
         Log.push(State.boorusStatus)
         task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.2))
         return true
@@ -9752,9 +9818,10 @@ function Feature.describeBoorusAvailability()
         return "Boorus: " .. statusText
     end
 
-    local lastChallengeDay = Feature.getBoorusLastChallengeDay()
-    if lastChallengeDay >= os.time() // 86400 then
-        return "Boorus challenge already completed today; waiting for reset."
+    local lastChallengePeriod = Feature.getBoorusLastChallengePeriod()
+    local currentPeriod = Feature.getCurrentBoorusChallengePeriod()
+    if lastChallengePeriod >= currentPeriod then
+        return "Boorus challenge already completed this reset; waiting for reset."
     end
     return "Boorus waiting for challenge reset or spins."
 end
@@ -9767,7 +9834,9 @@ function Feature.autoBoorusStep()
         return true
     end
     if Feature.startBoorusChallengeIfReady() then
-        Feature.runBoorusFightSupport()
+        if not Feature.runBoorusFightSupport() then
+            Feature.boorusSpinOnce()
+        end
         return true
     end
     State.boorusStatus = Feature.describeBoorusAvailability()

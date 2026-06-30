@@ -271,10 +271,13 @@ test("auto VIP rewards sync and claim through the ClaimVIP remote", () => {
 test("auto Boorus starts the daily boss challenge and completes Beerus wheel spins", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const startupBody = source.match(/function Feature\.startLoadedAutomationSettings\(\)([\s\S]*?)\nend/)?.[1] ?? "";
-  const readyBody = source.match(/function Feature\.isBoorusChallengeReady\(\)([\s\S]*?)\nfunction Feature\.startBoorusChallengeIfReady/)?.[1] ?? "";
+  const readyBody = source.match(/function Feature\.isBoorusChallengeReady\(\)([\s\S]*?)\nfunction Feature\.shouldPauseWaveStartForBoorus/)?.[1] ?? "";
   const startBody = source.match(/function Feature\.startBoorusChallengeIfReady\(\)([\s\S]*?)\nfunction Feature\.attachBoorusSpinComplete/)?.[1] ?? "";
   const activeBody = source.match(/function Feature\.isBoorusChallengeActive\(\)([\s\S]*?)\nfunction Feature\.waitForBoorusChallengeActive/)?.[1] ?? "";
-  const waitBody = source.match(/function Feature\.waitForBoorusChallengeActive\(timeout\)([\s\S]*?)\nfunction Feature\.startBoorusChallengeIfReady/)?.[1] ?? "";
+  const waitActiveBody = source.match(/function Feature\.waitForBoorusChallengeActive\(timeout\)([\s\S]*?)\nfunction Feature\.getBoorusChallengeStartSnapshot/)?.[1] ?? "";
+  const snapshotBody = source.match(/function Feature\.getBoorusChallengeStartSnapshot\(\)([\s\S]*?)\nfunction Feature\.getBoorusChallengeAcceptance/)?.[1] ?? "";
+  const acceptanceBody = source.match(/function Feature\.getBoorusChallengeAcceptance\(snapshot\)([\s\S]*?)\nfunction Feature\.waitForBoorusChallengeAccepted/)?.[1] ?? "";
+  const waitAcceptedBody = source.match(/function Feature\.waitForBoorusChallengeAccepted\(timeout, snapshot\)([\s\S]*?)\nfunction Feature\.disableAutoSkipForBoorus/)?.[1] ?? "";
   const disableSkipBody = source.match(/function Feature\.disableAutoSkipForBoorus\(\)([\s\S]*?)\nfunction Feature\.startBoorusChallengeIfReady/)?.[1] ?? "";
   const spinBody = source.match(/function Feature\.boorusSpinOnce\(\)([\s\S]*?)\nfunction Feature\.runBoorusFightSupport/)?.[1] ?? "";
   const stepBody = source.match(/function Feature\.autoBoorusStep\(\)([\s\S]*?)\nfunction Feature\.toggleBoorus/)?.[1] ?? "";
@@ -287,10 +290,15 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(source, /boorusStatus = "Waiting for data\."/);
   assert.match(source, /BeerusSpin = \{ "ReplicatedStorage", "Remotes", "SpinWheel", "BeerusSpin" \}/);
   assert.match(source, /function Feature\.getBoorusSpinCount/);
+  assert.match(source, /function Feature\.getCurrentBoorusChallengePeriod/);
+  assert.match(source, /function Feature\.getBoorusLastChallengePeriod/);
   assert.match(source, /function Feature\.getBoorusChallengePrompt/);
   assert.match(source, /function Feature\.isBoorusChallengeReady/);
   assert.match(source, /function Feature\.isBoorusChallengeActive/);
   assert.match(source, /function Feature\.waitForBoorusChallengeActive/);
+  assert.match(source, /function Feature\.getBoorusChallengeStartSnapshot/);
+  assert.match(source, /function Feature\.getBoorusChallengeAcceptance/);
+  assert.match(source, /function Feature\.waitForBoorusChallengeAccepted/);
   assert.match(source, /function Feature\.disableAutoSkipForBoorus/);
   assert.match(source, /function Feature\.shouldPauseWaveStartForBoorus/);
   assert.match(source, /function Feature\.startBoorusChallengeIfReady/);
@@ -300,11 +308,20 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.match(source, /function Feature\.autoBoorusStep/);
   assert.match(source, /function Feature\.toggleBoorus/);
   assert.match(readyBody, /Feature\.isBoorusChallengeStatusReady\(\)/);
-  assert.match(readyBody, /Feature\.getBoorusLastChallengeDay\(\)/);
-  assert.match(readyBody, /os\.time\(\) \/\/ 86400/);
+  assert.match(readyBody, /Feature\.getBoorusLastChallengePeriod\(\)/);
+  assert.match(readyBody, /Feature\.getCurrentBoorusChallengePeriod\(\)/);
   assert.match(activeBody, /workspace:FindFirstChild\("MutationStuffs"\)/);
   assert.match(activeBody, /FindFirstChild\("BeerusMap"\)/);
-  assert.match(waitBody, /Feature\.isBoorusChallengeActive\(\)/);
+  assert.match(waitActiveBody, /Feature\.isBoorusChallengeActive\(\)/);
+  assert.match(snapshotBody, /Feature\.isBoorusChallengeStatusReady\(\)/);
+  assert.match(snapshotBody, /Feature\.getBoorusLastChallengePeriod\(\)/);
+  assert.match(snapshotBody, /Feature\.getBoorusSpinCount\(\)/);
+  assert.match(acceptanceBody, /Feature\.isBoorusChallengeActive\(\)/);
+  assert.match(acceptanceBody, /Feature\.getBoorusLastChallengePeriod\(\)/);
+  assert.match(acceptanceBody, /Feature\.getCurrentBoorusChallengePeriod\(\)/);
+  assert.match(acceptanceBody, /Feature\.isBoorusChallengeStatusReady\(\)/);
+  assert.match(acceptanceBody, /Feature\.getBoorusSpinCount\(\)/);
+  assert.match(waitAcceptedBody, /Feature\.getBoorusChallengeAcceptance\(snapshot\)/);
   assert.match(disableSkipBody, /Feature\.dataGet\("AutoSkip", false\)/);
   assert.match(disableSkipBody, /Remote\.fire\("AutoSkip"\)/);
   assert.match(startBody, /if Feature\.isBoorusChallengeActive\(\) then/);
@@ -314,9 +331,12 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
   assert.ok(startBody.indexOf("Feature.disableAutoSkipForBoorus()") < startBody.indexOf("Remote.fire(\"EndWave\")"));
   assert.ok(startBody.indexOf("Remote.fire(\"EndWave\")") < startBody.indexOf("Feature.moveToPromptNaturally(prompt, Config.boorus.promptDistance)"));
   assert.match(autoStartWaveBody, /Feature\.shouldPauseWaveStartForBoorus\(\)/);
+  assert.match(startBody, /local startSnapshot = Feature\.getBoorusChallengeStartSnapshot\(\)/);
   assert.match(startBody, /Feature\.moveToPromptNaturally\(prompt, Config\.boorus\.promptDistance\)/);
   assert.match(startBody, /Feature\.holdPromptNaturally\(prompt\)/);
-  assert.match(startBody, /Feature\.waitForBoorusChallengeActive\(Config\.boorus\.startConfirmTimeout\)/);
+  assert.match(startBody, /Feature\.waitForBoorusChallengeAccepted\(Config\.boorus\.startConfirmTimeout, startSnapshot\)/);
+  assert.match(startBody, /acceptedReason == "active"/);
+  assert.doesNotMatch(startBody, /Feature\.waitForBoorusChallengeActive\(Config\.boorus\.startConfirmTimeout\)/);
   assert.doesNotMatch(startBody, /local ok = Feature\.holdPrompt\(prompt\)/);
   assert.match(spinBody, /Feature\.getBoorusSpinCount\(\)/);
   assert.match(spinBody, /Feature\.attachBoorusSpinComplete\(\)/);
@@ -333,25 +353,30 @@ test("auto Boorus starts the daily boss challenge and completes Beerus wheel spi
 
 test("auto Boorus trusts visible challenge availability over stale challenge data", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
-  const lastDayBody = source.match(/function Feature\.getBoorusLastChallengeDay\(\)([\s\S]*?)\nfunction Feature\.isBoorusChallengeStatusReady/)?.[1] ?? "";
+  const currentPeriodBody = source.match(/function Feature\.getCurrentBoorusChallengePeriod\(\)([\s\S]*?)\nfunction Feature\.getBoorusLastChallengePeriod/)?.[1] ?? "";
+  const lastPeriodBody = source.match(/function Feature\.getBoorusLastChallengePeriod\(\)([\s\S]*?)\nfunction Feature\.getBoorusLastChallengeDay/)?.[1] ?? "";
   const statusReadyBody = source.match(/function Feature\.isBoorusChallengeStatusReady\(\)([\s\S]*?)\nfunction Feature\.isBoorusChallengeReady/)?.[1] ?? "";
   const readyBody = source.match(/function Feature\.isBoorusChallengeReady\(\)([\s\S]*?)\nfunction Feature\.shouldPauseWaveStartForBoorus/)?.[1] ?? "";
   const describeBody = source.match(/function Feature\.describeBoorusAvailability\(\)([\s\S]*?)\nfunction Feature\.autoBoorusStep/)?.[1] ?? "";
 
-  assert.match(source, /function Feature\.getBoorusLastChallengeDay/);
+  assert.match(source, /function Feature\.getCurrentBoorusChallengePeriod/);
+  assert.match(source, /function Feature\.getBoorusLastChallengePeriod/);
   assert.match(source, /function Feature\.isBoorusChallengeStatusReady/);
-  assert.match(lastDayBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
-  assert.match(lastDayBody, /86400000/);
-  assert.match(lastDayBody, /86400/);
+  assert.match(currentPeriodBody, /os\.time\(\) \/\/ 43200/);
+  assert.match(lastPeriodBody, /Feature\.dataGet\("LastBeerusBossChallenge", 0\)/);
+  assert.match(lastPeriodBody, /43200000/);
+  assert.match(lastPeriodBody, /43200/);
+  assert.doesNotMatch(lastPeriodBody, /86400/);
   assert.match(statusReadyBody, /Feature\.getBoorusChallengeText\(\)/);
   assert.match(statusReadyBody, /challenge now/);
   assert.match(readyBody, /local statusReady = Feature\.isBoorusChallengeStatusReady\(\)/);
   assert.ok(
-    readyBody.indexOf("if statusReady then") < readyBody.indexOf("local lastChallengeDay = Feature.getBoorusLastChallengeDay()"),
+    readyBody.indexOf("if statusReady then") < readyBody.indexOf("local lastChallengePeriod = Feature.getBoorusLastChallengePeriod()"),
     "visible challenge-now text should win before checking stale LastBeerusBossChallenge data",
   );
-  assert.match(readyBody, /return lastChallengeDay <= 0 or lastChallengeDay < today/);
-  assert.match(describeBody, /Feature\.getBoorusLastChallengeDay\(\)/);
+  assert.match(readyBody, /return lastChallengePeriod <= 0 or lastChallengePeriod < currentPeriod/);
+  assert.match(describeBody, /Feature\.getBoorusLastChallengePeriod\(\)/);
+  assert.match(describeBody, /Feature\.getCurrentBoorusChallengePeriod\(\)/);
   assert.doesNotMatch(describeBody, /tonumber\(Feature\.dataGet\("LastBeerusBossChallenge", 0\)\)/);
 });
 
