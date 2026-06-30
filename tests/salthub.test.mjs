@@ -1639,23 +1639,37 @@ test("auto merge excludes locked characters from scan, selection, and merge exec
 
 test("settings include an unlock all action for locked units", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
+  const inventoryDataById = source.match(/function Feature\.getInventoryDataByCharacterId\(\)([\s\S]*?)function Feature\.getNativeInventoryLockedUnits/)?.[1] ?? "";
+  const nativeLockedUnits = source.match(/function Feature\.getNativeInventoryLockedUnits\(\)([\s\S]*?)function Feature\.getLockedUnits/)?.[1] ?? "";
   const getLockedUnits = source.match(/function Feature\.getLockedUnits\(\)([\s\S]*?)function Feature\.unlockUnit/)?.[1] ?? "";
   const unlockUnit = source.match(/function Feature\.unlockUnit\(unit\)([\s\S]*?)function Feature\.unlockAllUnits/)?.[1] ?? "";
   const unlockAll = source.match(/function Feature\.unlockAllUnits\(\)([\s\S]*?)function Feature\.traitScore/)?.[1] ?? "";
   const settingsTab = source.match(/name = "Settings",[\s\S]*?render = function\(page\)([\s\S]*?)\n        end,\n    },/)?.[1] ?? "";
 
   assert.match(source, /function Feature\.getLockedUnits/);
+  assert.match(source, /function Feature\.getInventoryDataByCharacterId/);
+  assert.match(source, /function Feature\.getNativeInventoryLockedUnits/);
+  assert.match(source, /function Feature\.getCharacterLockPayload/);
   assert.match(source, /function Feature\.unlockUnit/);
   assert.match(source, /function Feature\.unlockAllUnits/);
+  assert.match(inventoryDataById, /State\.dataGet\("Inventory", \{\}\)/);
+  assert.match(nativeLockedUnits, /Feature\.getInventoryDataByCharacterId\(\)/);
+  assert.match(nativeLockedUnits, /row:GetAttribute\("EntryKey"\)/);
+  assert.match(nativeLockedUnits, /row:FindFirstChild\("UnlockedFrame", true\)/);
+  assert.match(nativeLockedUnits, /lockedIcon\.Visible == true/);
   assert.match(getLockedUnits, /State\.scanUnits\(\)/);
   assert.match(getLockedUnits, /Feature\.isUnitLocked\(unit\)/);
+  assert.match(getLockedUnits, /Feature\.getNativeInventoryLockedUnits\(\)/);
   assert.match(unlockUnit, /Feature\.waitForRemoteCooldown\("CharacterLock"\)/);
-  assert.match(unlockUnit, /Remote\.fire\("CharacterLock", \{\s+CharacterId = tostring\(unit\.id\),\s+Name = unit\.name,\s+Locked = false,\s+\}\)/);
+  assert.match(unlockUnit, /local payload = Feature\.getCharacterLockPayload\(unit, false\)/);
+  assert.match(unlockUnit, /Remote\.fire\("CharacterLock", payload\)/);
+  assert.doesNotMatch(unlockUnit, /CharacterId = tostring\(unit\.id\),\s+Name = unit\.name,\s+Locked = false/);
   assert.match(unlockUnit, /unit\.locked = false/);
-  assert.match(unlockUnit, /State\.lockedUnitIds\[tostring\(unit\.id\)\] = nil/);
+  assert.match(unlockUnit, /State\.lockedUnitIds\[tostring\(payload\.CharacterId\)\] = nil/);
   assert.match(unlockAll, /local lockedUnits = Feature\.getLockedUnits\(\)/);
   assert.match(unlockAll, /Feature\.unlockUnit\(unit\)/);
   assert.match(unlockAll, /State\.scanUnits\(\)/);
+  assert.doesNotMatch(unlockAll, /State\.lockedUnitIds = \{\}/);
   assert.match(settingsTab, /UI\.button\(ui, "Unlock All", Feature\.unlockAllUnits, Theme\.accent2\)/);
 });
 

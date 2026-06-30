@@ -1518,6 +1518,23 @@ local function dataEntryValue(entry, names, fallback)
     return fallback
 end
 
+local function dataEntryCharacterName(entry, fallback)
+    local name = dataEntryValue(entry, { "Name", "CharacterName", "UnitName", "DisplayName" }, nil)
+    if name ~= nil and tostring(name) ~= "" then
+        return tostring(name)
+    end
+
+    local entryId = dataEntryValue(entry, { "EntryId", "EntryID" }, nil)
+    if type(entryId) == "string" then
+        local parsed = entryId:match("^([^|]+)")
+        if parsed and parsed ~= "" then
+            return parsed
+        end
+    end
+
+    return tostring(fallback or "")
+end
+
 local UNIT_LOCK_VALUE_NAMES = { "Locked", "IsLocked", "Lock", "IsLock", "CharacterLocked", "UnitLocked", "Protected", "IsProtected" }
 local UNIT_LOCK_ID_NAMES = { "CharacterId", "CharacterID", "UID", "Uuid", "UUID", "Id", "ID" }
 local UNIT_LOCK_DATA_SOURCES = { "LockedCharacters", "LockedUnits", "CharacterLocks", "InventoryLocks", "ProtectedCharacters", "ProtectedUnits" }
@@ -7945,6 +7962,74 @@ function Feature.waitForRemoteCooldown(key)
     end
 end
 
+function Feature.getInventoryDataByCharacterId()
+    local byId = {}
+    local inventory = State.dataGet("Inventory", {})
+    if type(inventory) ~= "table" then
+        return byId
+    end
+
+    for _, entry in pairs(inventory) do
+        if type(entry) == "table" then
+            local id = dataEntryValue(entry, UNIT_LOCK_ID_NAMES, nil)
+            id = id and tostring(id) or ""
+            if id ~= "" then
+                byId[id] = entry
+            end
+        end
+    end
+    return byId
+end
+
+function Feature.getNativeInventoryLockedUnits()
+    local lockedUnits = {}
+    local inventoryById = Feature.getInventoryDataByCharacterId()
+    local mainUi = PlayerGui:FindFirstChild("MainUI")
+    local frames = mainUi and mainUi:FindFirstChild("Frames")
+    local inventory = frames and frames:FindFirstChild("Inventory")
+    local inventoryFrame = inventory and inventory:FindFirstChild("InventoryFrame")
+    local scrolling = inventoryFrame and inventoryFrame:FindFirstChild("ScrollingFrame")
+    if not scrolling then
+        return lockedUnits
+    end
+
+    local seen = {}
+    for _, row in ipairs(scrolling:GetChildren()) do
+        if row:IsA("GuiObject") then
+            local id = row:GetAttribute("EntryKey")
+            id = id and tostring(id) or ""
+            if id ~= "" and not seen[id] then
+                local entry = inventoryById[id]
+                local unlockedFrame = row:FindFirstChild("UnlockedFrame", true)
+                local lockButton = unlockedFrame and unlockedFrame:FindFirstChild("LockButton", true)
+                local lockedIcon = lockButton and lockButton:FindFirstChild("Locked")
+                local unlockedIcon = lockButton and lockButton:FindFirstChild("Unlocked")
+                local lockedByIcon = lockedIcon and lockedIcon:IsA("GuiObject") and lockedIcon.Visible == true
+                local lockedByData = readDataEntryLocked(entry, id, nil)
+
+                if lockedByIcon or lockedByData then
+                    seen[id] = true
+                    table.insert(lockedUnits, {
+                        id = id,
+                        characterId = id,
+                        name = dataEntryCharacterName(entry, row.Name),
+                        level = tostring(dataEntryValue(entry, { "Level", "Lvl" }, "?")),
+                        mutation = normalizeUnitMutation(dataEntryValue(entry, { "Mutation", "MutationName", "MutationType" }, "None")),
+                        trait = traitForCharacter(State.dataGet("Traits", {}), id, dataEntryValue(entry, { "Trait", "TraitName", "Passive" }, "None")),
+                        locked = true,
+                        dataEntry = entry,
+                        nativeInventoryRow = row,
+                        nativeLockButton = lockButton,
+                        nativeLockedIcon = lockedIcon,
+                        nativeUnlockedIcon = unlockedIcon,
+                    })
+                end
+            end
+        end
+    end
+    return lockedUnits
+end
+
 function Feature.getLockedUnits()
     local lockedUnits = {}
     local seen = {}
@@ -7956,7 +8041,33 @@ function Feature.getLockedUnits()
             table.insert(lockedUnits, unit)
         end
     end
+    for _, unit in ipairs(Feature.getNativeInventoryLockedUnits()) do
+        local id = tostring(unit and unit.id or "")
+        if id ~= "" and not seen[id] then
+            seen[id] = true
+            table.insert(lockedUnits, unit)
+        end
+    end
     return lockedUnits
+end
+
+function Feature.getCharacterLockPayload(unit, locked)
+    if not unit then
+        return nil
+    end
+
+    local entry = unit.dataEntry
+    local id = unit.characterId or dataEntryValue(entry, UNIT_LOCK_ID_NAMES, unit.id)
+    id = id and tostring(id) or ""
+    if id == "" then
+        return nil
+    end
+
+    return {
+        CharacterId = id,
+        Name = dataEntryCharacterName(entry, unit.name),
+        Locked = locked == true,
+    }
 end
 
 function Feature.unlockUnit(unit)
@@ -7964,16 +8075,26 @@ function Feature.unlockUnit(unit)
         return false
     end
 
+    local payload = Feature.getCharacterLockPayload(unit, false)
+    if not payload then
+        return false
+    end
+
     Feature.waitForRemoteCooldown("CharacterLock")
-    local ok = Remote.fire("CharacterLock", {
-        CharacterId = tostring(unit.id),
-        Name = unit.name,
-        Locked = false,
-    })
+    local ok = Remote.fire("CharacterLock", payload)
     if ok then
         unit.locked = false
-        State.lockedUnitIds[tostring(unit.id)] = nil
+        State.lockedUnitIds[tostring(payload.CharacterId)] = nil
         State.lockedUnitIdsReady = true
+        if type(unit.dataEntry) == "table" then
+            unit.dataEntry.Locked = false
+        end
+        if unit.nativeLockedIcon and unit.nativeLockedIcon:IsA("GuiObject") then
+            unit.nativeLockedIcon.Visible = false
+        end
+        if unit.nativeUnlockedIcon and unit.nativeUnlockedIcon:IsA("GuiObject") then
+            unit.nativeUnlockedIcon.Visible = true
+        end
         if unit.instance then
             for _, attrName in ipairs(UNIT_LOCK_VALUE_NAMES) do
                 pcall(function()
@@ -7998,7 +8119,6 @@ function Feature.unlockAllUnits()
             unlocked += 1
         end
     end
-    State.lockedUnitIds = {}
     State.lockedUnitIdsReady = false
     State.scanUnits()
     Log.push("Unlock All sent for " .. tostring(unlocked) .. "/" .. tostring(#lockedUnits) .. " locked units.")
