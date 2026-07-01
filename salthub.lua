@@ -4381,8 +4381,28 @@ function Feature.ensureHighestWaveCheckpoint()
     return false
 end
 
+function Feature.shouldPauseWaveStartForShenron()
+    if Config.flags.autoShenron ~= true then
+        return false
+    end
+    if not Feature.isSuperShenronEventActive() then
+        return false
+    end
+
+    local wishName = Feature.getBestShenronWish()
+    if not Feature.isShenronDoombringerWish(wishName) then
+        return false
+    end
+
+    State.shenronStatus = "Auto Start Wave paused for Doombringer wish prep."
+    return true
+end
+
 function Feature.autoStartWaveStep()
     if Feature.shouldPauseWaveStartForBoorus() then
+        return
+    end
+    if Feature.shouldPauseWaveStartForShenron() then
         return
     end
 
@@ -10733,13 +10753,17 @@ function Feature.getMutationStuffsShenronRoot(instance)
     end
 
     local current = instance
-    while current and current.Parent and current.Parent ~= mutationStuffs do
+    local candidate = nil
+    while current and current ~= mutationStuffs do
+        local currentName = tostring(current.Name or "")
+        if not candidate
+            and (currentName:match("^Ball%d$")
+                or textMatchesAny(currentName, { "DragonBall", "Dragon Ball", "Shenron", "Super Dragon balls" })) then
+            candidate = current
+        end
         current = current.Parent
     end
-    if current and current.Parent == mutationStuffs then
-        return current
-    end
-    return nil
+    return candidate
 end
 
 function Feature.isMutationStuffsShenronDragonBallRoot(instance)
@@ -10775,6 +10799,11 @@ function Feature.getShenronScanRoots()
         for _, child in ipairs(mutationStuffs:GetChildren()) do
             if Feature.isMutationStuffsShenronDragonBallRoot(child) then
                 add(child)
+            end
+        end
+        for _, descendant in ipairs(mutationStuffs:GetDescendants()) do
+            if Feature.isMutationStuffsShenronDragonBallRoot(descendant) then
+                add(descendant)
             end
         end
     end
@@ -10829,7 +10858,7 @@ function Feature.getShenronDragonBallName(instance)
         if ballNumber then
             local shenronDragonBalls = workspace:FindFirstChild("ShenronDragonBalls")
             local character = LocalPlayer.Character
-            if (mutationStuffs and current.Parent == mutationStuffs)
+            if (mutationStuffs and Feature.isMutationStuffsShenronDragonBallRoot(current))
                 or (shenronDragonBalls and current:IsDescendantOf(shenronDragonBalls))
                 or (character and current:IsDescendantOf(character)) then
                 return "DragonBall" .. tostring(ballNumber)

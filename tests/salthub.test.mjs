@@ -608,6 +608,20 @@ test("auto Shenron ignores Dragonborn decoration dragon balls", () => {
   assert.match(stepBody, /if not Feature\.shouldRunAutoShenron\(\) then[\s\S]*?return false/);
 });
 
+test("auto Shenron scans nested Super Dragon balls under MutationStuffs map", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const mutationRootBody = source.match(/function Feature\.getMutationStuffsShenronRoot\(instance\)([\s\S]*?)\nfunction Feature\.isMutationStuffsShenronDragonBallRoot/)?.[1] ?? "";
+  const scanRootsBody = source.match(/function Feature\.getShenronScanRoots\(\)([\s\S]*?)function Feature\.getShenronDragonBallName/)?.[1] ?? "";
+  const ballNameBody = source.match(/function Feature\.getShenronDragonBallName\(instance\)([\s\S]*?)function Feature\.isShenronCollectPrompt/)?.[1] ?? "";
+
+  assert.match(mutationRootBody, /while current and current ~= mutationStuffs do/);
+  assert.match(mutationRootBody, /candidate = current/);
+  assert.match(mutationRootBody, /return candidate/);
+  assert.match(scanRootsBody, /for _, descendant in ipairs\(mutationStuffs:GetDescendants\(\)\) do/);
+  assert.match(scanRootsBody, /Feature\.isMutationStuffsShenronDragonBallRoot\(descendant\)/);
+  assert.match(ballNameBody, /Feature\.isMutationStuffsShenronDragonBallRoot\(current\)/);
+});
+
 test("auto Shenron collects meteor rain pickups after a meteor wish", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const refreshBody = source.match(/function Feature\.refreshShenronMeteorDropCache\(\)([\s\S]*?)function Feature\.getShenronMeteorDrops/)?.[1] ?? "";
@@ -2372,6 +2386,7 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.match(source, /function Feature\.isWaveStarted/);
   assert.match(source, /function Feature\.isWaveUiStarted/);
   assert.match(source, /function Feature\.shouldStartWave/);
+  assert.match(source, /function Feature\.shouldPauseWaveStartForShenron/);
   assert.match(source, /function Feature\.getHighestWaveCheckpoint/);
   assert.match(source, /function Feature\.getSelectedWaveCheckpoint/);
   assert.match(source, /function Feature\.ensureHighestWaveCheckpoint/);
@@ -2393,6 +2408,7 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.match(waveStartedBody, /Feature\.isWaveUiStarted\(\)/);
 
   const stepBody = source.match(/function Feature\.autoStartWaveStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(stepBody, /Feature\.shouldPauseWaveStartForShenron\(\)/);
   assert.match(stepBody, /if not Feature\.shouldStartWave\(\) then[\s\S]*?return/);
   assert.match(stepBody, /if Config\.wave\.startHighest ~= false and not Feature\.ensureHighestWaveCheckpoint\(\) then[\s\S]*?return/);
   assert.match(stepBody, /State\.lastWaveStartAt = os\.clock\(\)/);
@@ -2418,6 +2434,24 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.doesNotMatch(waveTabBody, /function\(\)\s*Remote\.fire\("StartWave"\)\s*end/);
   assert.match(source, /UI\.toggle\(controls, "Start Highest Wave"/);
   assert.doesNotMatch(source, /UI\.toggle\(controls, "Auto Skip"/);
+});
+
+test("auto start wave pauses during Super Shenron Doombringer prep", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const pauseBody = source.match(/function Feature\.shouldPauseWaveStartForShenron\(\)([\s\S]*?)\nfunction Feature\.autoStartWaveStep/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoStartWaveStep\(\)([\s\S]*?)\nfunction Feature\.setAutoStartWave/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.shouldPauseWaveStartForShenron/);
+  assert.match(pauseBody, /Config\.flags\.autoShenron ~= true/);
+  assert.match(pauseBody, /Feature\.isSuperShenronEventActive\(\)/);
+  assert.match(pauseBody, /local wishName = Feature\.getBestShenronWish\(\)/);
+  assert.match(pauseBody, /Feature\.isShenronDoombringerWish\(wishName\)/);
+  assert.match(pauseBody, /Auto Start Wave paused for Doombringer wish prep/);
+  assert.match(stepBody, /if Feature\.shouldPauseWaveStartForShenron\(\) then[\s\S]*?return/);
+  assert.ok(
+    stepBody.indexOf("Feature.shouldPauseWaveStartForShenron()") < stepBody.indexOf("Feature.shouldStartWave()"),
+    "Auto Start must yield to Shenron before checking normal wave start conditions",
+  );
 });
 
 test("auto start wave waits for pending auto buys", () => {
