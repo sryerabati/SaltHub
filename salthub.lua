@@ -115,7 +115,7 @@ local Config = {
         rollStationBehindDistance = 5.6,
         stationReturnDelay = 12.0,
         stationReturnDistance = 12.0,
-        smoothMovement = true,
+        smoothMovement = false,
         promptDistance = 3.15,
         promptApproachJitter = 0.85,
         promptMoveTimeout = 2.2,
@@ -123,7 +123,7 @@ local Config = {
         promptDelayMax = 0.28,
         promptHoldExtraMin = 0.08,
         promptHoldExtraMax = 0.2,
-        promptTeleportFallback = false,
+        promptTeleportFallback = true,
     },
     merge = {
         targetUnitId = "",
@@ -377,6 +377,8 @@ local function applyAutoRollTimingSafetyDefaults()
     Config.delays.buyAttemptWindow = math.max(tonumber(Config.delays.buyAttemptWindow) or 0, 8.0)
     Config.delays.buyRetryPoll = math.max(tonumber(Config.delays.buyRetryPoll) or 0, 0.35)
     Config.delays.fastRollRollSettle = math.max(tonumber(Config.delays.fastRollRollSettle or Config.delays.fastRollBuyHold) or 0, 2.75)
+    Config.roll.smoothMovement = false
+    Config.roll.promptTeleportFallback = true
     Config.roll.promptDistance = math.max(tonumber(Config.roll.promptDistance) or 3.15, 0.75)
     Config.roll.promptApproachJitter = math.max(tonumber(Config.roll.promptApproachJitter) or 0.85, 0)
     Config.roll.promptMoveTimeout = math.max(tonumber(Config.roll.promptMoveTimeout) or 2.2, Config.delays.moveTimeout or 1.35)
@@ -12087,12 +12089,6 @@ local Tabs = {
             UI.toggle(main, "Auto Buy", function()
                 return Config.flags.autoBuy
             end, Feature.toggleAutoBuy)
-            UI.toggle(main, "Smooth Roll Movement", function()
-                return Config.roll.smoothMovement
-            end, function(value)
-                Config.roll.smoothMovement = value
-                Feature.applyAutoRollSettingsLocal()
-            end)
             UI.toggle(main, "Hold Pity For Event", function()
                 return Config.flags.holdPityForEvent
             end, function(value)

@@ -1000,11 +1000,12 @@ test("prompt activation is exact so rolling cannot accidentally buy podium units
   assert.doesNotMatch(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
 });
 
-test("auto roll uses smooth prompt movement instead of direct prompt teleporting", () => {
+test("auto roll and auto buy force prompt teleport movement", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 
   assert.match(source, /rollStationBehindDistance = 5\.6/);
-  assert.match(source, /smoothMovement = true/);
+  assert.match(source, /smoothMovement = false/);
+  assert.match(source, /promptTeleportFallback = true/);
   assert.match(source, /promptDistance = 3\.15/);
   assert.match(source, /promptApproachJitter = 0\.85/);
   assert.match(source, /promptDelayMin = 0\.08/);
@@ -1023,6 +1024,9 @@ test("auto roll uses smooth prompt movement instead of direct prompt teleporting
   assert.match(approachBody, /Feature\.randomBetween\(-jitter, jitter\)/);
   assert.match(approachBody, /tangent \* sideOffset/);
   const moveBody = source.match(/function Feature\.moveToPromptNaturally\(prompt, distance\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const autoRollSafetyBody = source.match(/local function applyAutoRollTimingSafetyDefaults\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(autoRollSafetyBody, /Config\.roll\.smoothMovement = false/);
+  assert.match(autoRollSafetyBody, /Config\.roll\.promptTeleportFallback = true/);
   assert.match(moveBody, /Feature\.moveToCFrame\(targetCFrame, Config\.roll\.promptMoveTimeout, false\)/);
   assert.match(moveBody, /Feature\.waitNaturalPromptDelay\(\)/);
   assert.match(moveBody, /if not Config\.roll\.smoothMovement then[\s\S]*?Feature\.teleportToPrompt\(prompt, distance\)/);
@@ -1030,7 +1034,7 @@ test("auto roll uses smooth prompt movement instead of direct prompt teleporting
   assert.match(rollBody, /Feature\.moveToPromptNaturally\(prompt, Config\.roll\.promptDistance\)/);
   assert.doesNotMatch(rollBody, /Feature\.returnToRollStation\(\)/);
   assert.doesNotMatch(rollBody, /Feature\.teleportToPrompt\(prompt, 3\.15\)/);
-  assert.match(source, /UI\.toggle\(main, "Smooth Roll Movement"/);
+  assert.doesNotMatch(source, /UI\.toggle\(main, "Smooth Roll Movement"/);
 });
 
 test("auto roll returns to station after being away for a short delay", () => {
@@ -1156,6 +1160,8 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.match(autoRollSafetyBody, /Config\.delays\.rollSettle = math\.max\(tonumber\(Config\.delays\.rollSettle\) or 0, 1\.25\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.buyReservePause = math\.max\(tonumber\(Config\.delays\.buyReservePause\) or 0, 4\.0\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.fastRollRollSettle = math\.max\(tonumber\(Config\.delays\.fastRollRollSettle or Config\.delays\.fastRollBuyHold\) or 0, 2\.75\)/);
+  assert.match(autoRollSafetyBody, /Config\.roll\.smoothMovement = false/);
+  assert.match(autoRollSafetyBody, /Config\.roll\.promptTeleportFallback = true/);
   assert.match(autoRollSafetyBody, /Config\.roll\.promptDelayMin = math\.max\(tonumber\(Config\.roll\.promptDelayMin\) or 0, 0\)/);
   assert.match(autoRollSafetyBody, /Config\.roll\.promptDelayMax = math\.max\(tonumber\(Config\.roll\.promptDelayMax\) or 0, Config\.roll\.promptDelayMin\)/);
   assert.match(source, /applyAutoRollTimingSafetyDefaults\(\)/);
