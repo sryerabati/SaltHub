@@ -2364,6 +2364,7 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.match(source, /if Config\.flags\.autoFastForward then\s+Feature\.setAutoFastForward\(true\)/);
   assert.match(source, /Feature\.startLoadedAutomationSettings\(\)/);
   assert.match(source, /function Feature\.isWaveStarted/);
+  assert.match(source, /function Feature\.isWaveUiStarted/);
   assert.match(source, /function Feature\.shouldStartWave/);
   assert.match(source, /function Feature\.getHighestWaveCheckpoint/);
   assert.match(source, /function Feature\.getSelectedWaveCheckpoint/);
@@ -2372,8 +2373,18 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.match(source, /Checkpoint = \{ "ReplicatedStorage", "Remotes", "Checkpoint" \}/);
   assert.match(source, /local WAVE_CHECKPOINTS = \{ 0, 25, 50, 75, 100, 125, 150, 175, 200 \}/);
   assert.match(source, /plot:GetAttribute\("WaveStarted"\) == true/);
+  assert.match(source, /Feature\.isWaveUiStarted\(\)/);
+  assert.match(source, /FindFirstChild\("MainUI"\)/);
+  assert.match(source, /FindFirstChild\("UITop"\)/);
+  assert.match(source, /FindFirstChild\("Start"\)/);
+  assert.match(source, /textMatchesAny\(label\.Text, \{ "Stop" \}\)/);
+  assert.match(source, /waveFrame:IsA\("GuiObject"\) and waveFrame\.Visible/);
   assert.match(source, /State\.lastWaveStartAt/);
   assert.match(source, /os\.clock\(\) - \(State\.lastWaveStartAt or 0\)/);
+
+  const waveStartedBody = source.match(/function Feature\.isWaveStarted\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(waveStartedBody, /plot:GetAttribute\("WaveStarted"\) == true/);
+  assert.match(waveStartedBody, /Feature\.isWaveUiStarted\(\)/);
 
   const stepBody = source.match(/function Feature\.autoStartWaveStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(stepBody, /if not Feature\.shouldStartWave\(\) then[\s\S]*?return/);

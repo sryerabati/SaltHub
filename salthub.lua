@@ -4258,9 +4258,39 @@ function Feature.getOwnedPlot()
     return closestPlot
 end
 
+function Feature.getWaveUiStartRoot()
+    local mainUi = PlayerGui and PlayerGui:FindFirstChild("MainUI")
+    local uiTop = mainUi and mainUi:FindFirstChild("UITop")
+    return uiTop and uiTop:FindFirstChild("Start")
+end
+
+function Feature.isWaveUiStarted()
+    local startRoot = Feature.getWaveUiStartRoot()
+    if not startRoot then
+        return false
+    end
+
+    local startButton = startRoot:FindFirstChild("Start")
+    local label = startButton and startButton:FindFirstChild("TextLabel", true)
+    if label and label:IsA("TextLabel") and textMatchesAny(label.Text, { "Stop" }) then
+        return true
+    end
+
+    local waveFrame = startRoot:FindFirstChild("Wave")
+    if waveFrame and waveFrame:IsA("GuiObject") and waveFrame.Visible then
+        return true
+    end
+
+    return false
+end
+
 function Feature.isWaveStarted()
     local plot = Feature.getOwnedPlot()
-    return plot and plot:GetAttribute("WaveStarted") == true
+    if plot and plot:GetAttribute("WaveStarted") == true then
+        return true
+    end
+
+    return Feature.isWaveUiStarted()
 end
 
 function Feature.shouldPauseWaveStartForAutoBuy()
