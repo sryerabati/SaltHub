@@ -212,6 +212,7 @@ local Config = {
         collectRetries = 3,
         feedRetries = 3,
         scanInterval = 0.65,
+        dataPollInterval = 1.0,
         dropInterval = 1.5,
         holdPoll = 4.0,
         holdLogInterval = 8.0,
@@ -960,6 +961,7 @@ local State = {
     lastTraitLogAt = 0,
     dataClient = nil,
     buhara = nil,
+    buharaDataScanAt = 0,
     buharaFoodDrops = {},
     buharaFoodScanAt = 0,
     buharaTarget = nil,
@@ -9944,6 +9946,13 @@ function Feature.toggleBoorus(value)
 end
 
 function Feature.getBuharaData()
+    local now = os.clock()
+    local interval = math.max(tonumber(Config.buhara.dataPollInterval) or 1.0, tonumber(Config.safety.remoteCooldown) or 0.35)
+    if now - (State.buharaDataScanAt or 0) < interval then
+        return State.buhara
+    end
+
+    State.buharaDataScanAt = now
     local data = Remote.invoke("BuharaData")
     if type(data) == "table" then
         State.buhara = data
@@ -10396,11 +10405,17 @@ function Feature.shouldPauseBuharaForAutoMerge()
 end
 
 function Feature.getBuharaEventNames()
-    return Config.buhara.eventNames or { "Buhara", "Burah", "BuharaEvent" }
+    local names = {}
+    for _, item in ipairs(Config.buhara.eventNames or { "Buhara", "Burah", "BuharaEvent" }) do
+        if type(item) == "string" and item ~= "" then
+            table.insert(names, item)
+        end
+    end
+    return uniqueSorted(names)
 end
 
 function Feature.isBuharaEventActive()
-    local eventNames = DataSource.expandSnipeEventNames(Feature.getBuharaEventNames())
+    local eventNames = Feature.getBuharaEventNames()
     if not listHasItems(eventNames) then
         return false
     end
@@ -10426,7 +10441,43 @@ function Feature.isBuharaEventActive()
 
     local main = PlayerGui:FindFirstChild("MainUI")
     local frames = main and main:FindFirstChild("Frames")
-    return Feature.textRootHasSelectedEvent(frames and frames:FindFirstChild("Events"), eventNames)
+    if Feature.textRootHasSelectedEvent(frames and frames:FindFirstChild("Events"), eventNames) then
+        return true
+    end
+
+    return Feature.hasActiveBuharaProgress()
+end
+
+function Feature.hasActiveBuharaProgress(data)
+    local foodNeeded = type(data) == "table" and data.FoodNeeded or nil
+    if type(foodNeeded) == "table" then
+        for _ in pairs(foodNeeded) do
+            return true
+        end
+    end
+
+    local slots = Feature.getBuharaGuiSlots()
+    if #slots > 0 then
+        return true
+    end
+
+    local gui = PlayerGui:FindFirstChild("BuharaEvent")
+    if not gui or gui.Enabled == false then
+        return false
+    end
+
+    local progress = gui:FindFirstChild("Progress")
+    if progress and progress:IsA("GuiObject") and progress.Visible == false then
+        return false
+    end
+
+    if Feature.areBuharaRequirementsReady(data) then
+        return true
+    end
+    if #Feature.getBuharaWantedFoods(data) > 0 then
+        return true
+    end
+    return false
 end
 
 function Feature.shouldRunAutoBuhara()
@@ -10434,6 +10485,10 @@ function Feature.shouldRunAutoBuhara()
         return true
     end
     if Feature.isCarryingBuharaFood() then
+        return true
+    end
+    local data = Feature.getBuharaData()
+    if Feature.hasActiveBuharaProgress(data) then
         return true
     end
 
@@ -10460,31 +10515,27 @@ function Feature.getAutoBuharaLoopDelay()
     return Config.delays.event
 end
 
+function Feature.dropCarriedBuharaFood()
+    if not Feature.isCarryingBuharaFood() then
+        return false
+    end
+
+    Remote.fire("BuharaDropFood")
+    task.wait(0.2)
+    return not Feature.isCarryingBuharaFood()
+end
+
 function Feature.feedBuhara(forceAttempt)
     if not forceAttempt and not Feature.isCarryingBuharaFood() then
         return false
     end
-
-    local target = Feature.findBuharaTarget()
-    if not target then
-        Feature.setBuharaHoldBackoff("Buhara target is not visible yet; holding food.")
-        return false
-    end
-
-    local prompt = Feature.getBuharaFeedPrompt(target)
-    if not prompt then
-        Feature.moveToBuharaFeedPrompt(target, nil)
-        Feature.setBuharaHoldBackoff("Buhara feed prompt was not found yet; holding food.")
+    if not Feature.isCarryingBuharaFood() then
         return false
     end
 
     Feature.clearBuharaHoldBackoff()
     for attempt = 1, math.max(tonumber(Config.buhara.feedRetries) or 1, 1) do
-        Feature.moveToBuharaFeedPrompt(target, prompt)
-        task.wait(0.06)
-        Feature.tryBuharaPrompt(prompt)
-        task.wait(0.2)
-        if not Feature.isCarryingBuharaFood() then
+        if Feature.dropCarriedBuharaFood() then
             Feature.clearBuharaHoldBackoff()
             return true
         end
