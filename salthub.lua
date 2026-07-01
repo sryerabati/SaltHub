@@ -10101,6 +10101,33 @@ function Feature.getBuharaFoodName(instance)
     return nil
 end
 
+function Feature.isBuharaFoodHeldByOtherPlayer(instance)
+    if not instance then
+        return false
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and (instance == player.Character or instance:IsDescendantOf(player.Character)) then
+            return true
+        end
+    end
+
+    local current = instance
+    while current and current ~= workspace do
+        for _, attrName in ipairs({ "Owner", "OwnerName", "Player", "PlayerName", "UserId", "OwnerId" }) do
+            local owner = current:GetAttribute(attrName)
+            if owner ~= nil then
+                local ownerText = tostring(owner)
+                if ownerText ~= tostring(LocalPlayer.Name) and ownerText ~= tostring(LocalPlayer.UserId) then
+                    return true
+                end
+            end
+        end
+        current = current.Parent
+    end
+    return false
+end
+
 function Feature.getBuharaScanRoots()
     local roots = {}
     local seen = {}
@@ -10160,7 +10187,7 @@ function Feature.refreshBuharaFoodDropCache(wantedFoods)
 
             if instance:IsA("ProximityPrompt") or instance:IsA("BasePart") or instance:IsA("Model") or instance:IsA("Tool") then
                 local foodName = Feature.getBuharaFoodName(instance)
-                if foodName and wanted[foodName] then
+                if foodName and wanted[foodName] and not Feature.isBuharaFoodHeldByOtherPlayer(instance) then
                     local prompt = instance:IsA("ProximityPrompt") and instance or instance:FindFirstChildWhichIsA("ProximityPrompt", true)
                     local target = prompt or instance
                     local part = Feature.getTargetPart(target)
@@ -10266,8 +10293,14 @@ function Feature.collectBuharaFood(drop)
     if not drop or not drop.instance then
         return false
     end
+    if Feature.isBuharaFoodHeldByOtherPlayer(drop.instance) then
+        return false
+    end
 
     for attempt = 1, math.max(tonumber(Config.buhara.collectRetries) or 1, 1) do
+        if Feature.isBuharaFoodHeldByOtherPlayer(drop.instance) then
+            return false
+        end
         Feature.teleportToBuharaObject(drop.instance, Config.buhara.foodCollectDistance)
         task.wait(0.06)
         if drop.prompt then
@@ -10515,11 +10548,18 @@ function Feature.getAutoBuharaLoopDelay()
     return Config.delays.event
 end
 
-function Feature.dropCarriedBuharaFood()
+function Feature.dropCarriedBuharaFood(target)
     if not Feature.isCarryingBuharaFood() then
         return false
     end
+    if not target then
+        return false
+    end
+    if not Feature.moveToBuharaFeedPrompt(target, nil) then
+        return false
+    end
 
+    task.wait(0.08)
     Remote.fire("BuharaDropFood")
     task.wait(0.2)
     return not Feature.isCarryingBuharaFood()
@@ -10533,9 +10573,15 @@ function Feature.feedBuhara(forceAttempt)
         return false
     end
 
+    local target = Feature.findBuharaTarget()
+    if not target then
+        Feature.setBuharaHoldBackoff("Buhara target is not visible yet; holding food.")
+        return false
+    end
+
     Feature.clearBuharaHoldBackoff()
     for attempt = 1, math.max(tonumber(Config.buhara.feedRetries) or 1, 1) do
-        if Feature.dropCarriedBuharaFood() then
+        if Feature.dropCarriedBuharaFood(target) then
             Feature.clearBuharaHoldBackoff()
             return true
         end
