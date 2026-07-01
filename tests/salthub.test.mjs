@@ -1029,6 +1029,29 @@ test("auto roll uses smooth prompt movement instead of direct prompt teleporting
   assert.match(source, /UI\.toggle\(main, "Smooth Roll Movement"/);
 });
 
+test("auto roll returns to station after being away for a short delay", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const autoRollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nfunction Feature\.describeRolledCharacters/)?.[1] ?? "";
+  const returnBody = source.match(/function Feature\.returnToRollStationIfAway\(\)([\s\S]*?)\nfunction Feature\.rollOnceWithoutMovement/)?.[1] ?? "";
+  const stationBody = source.match(/function Feature\.returnToRollStation\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+
+  assert.match(source, /stationReturnDelay = 12\.0/);
+  assert.match(source, /stationReturnDistance = 12\.0/);
+  assert.match(source, /rollAwaySince = 0/);
+  assert.match(source, /function Feature\.getRollStationDistance/);
+  assert.match(source, /function Feature\.returnToRollStationIfAway/);
+  assert.match(returnBody, /Config\.flags\.autoRoll ~= true/);
+  assert.match(returnBody, /State\.buyingCharacter or State\.pendingBuy/);
+  assert.match(returnBody, /Feature\.shouldPauseRollForBoorus\(\)/);
+  assert.match(returnBody, /distance <= \(tonumber\(Config\.roll\.stationReturnDistance\) or 12\.0\)/);
+  assert.match(returnBody, /State\.rollAwaySince = now/);
+  assert.match(returnBody, /now - \(State\.rollAwaySince or 0\) < \(tonumber\(Config\.roll\.stationReturnDelay\) or 12\.0\)/);
+  assert.match(returnBody, /Feature\.returnToRollStation\(\)/);
+  assert.match(stationBody, /Feature\.teleportToCFrame\(station\)/);
+  assert.ok(autoRollBody.indexOf("Feature.returnToRollStationIfAway()") < autoRollBody.indexOf("Feature.shouldHoldPityForEvent()"));
+  assert.ok(autoRollBody.indexOf("Feature.returnToRollStationIfAway()") < autoRollBody.indexOf("Feature.rollOnceWithoutMovement()"));
+});
+
 test("auto roll settles between rolls and auto buy can run independently", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
 

@@ -113,6 +113,8 @@ local Config = {
         unitRules = {},
         maxPodiumCharacters = 6,
         rollStationBehindDistance = 5.6,
+        stationReturnDelay = 12.0,
+        stationReturnDistance = 12.0,
         smoothMovement = true,
         promptDistance = 3.15,
         promptApproachJitter = 0.85,
@@ -942,6 +944,7 @@ local State = {
     lastWaveStartAt = 0,
     lastRollAt = 0,
     rollBusyUntil = 0,
+    rollAwaySince = 0,
     pityHoldUntil = 0,
     lastBuyAt = 0,
     fastRollOwned = false,
@@ -4848,7 +4851,7 @@ function Feature.returnToRollStation()
     if not station then
         return false
     end
-    return Feature.moveToCFrame(station, Config.delays.moveTimeout)
+    return Feature.teleportToCFrame(station)
 end
 
 function Feature.teleportToInstance(instance)
@@ -5000,6 +5003,54 @@ function Feature.holdPromptNaturally(prompt)
     end
 
     return Feature.holdPrompt(prompt)
+end
+
+function Feature.getRollStationDistance()
+    local root = Feature.getCharacterRoot()
+    local station = Feature.getRollStationCFrame()
+    if not root or not station then
+        return nil
+    end
+    return (root.Position - station.Position).Magnitude
+end
+
+function Feature.returnToRollStationIfAway()
+    if Config.flags.autoRoll ~= true then
+        State.rollAwaySince = 0
+        return false
+    end
+    if State.buyingCharacter or State.pendingBuy then
+        State.rollAwaySince = 0
+        return false
+    end
+    if Feature.shouldPauseRollForBoorus() then
+        State.rollAwaySince = 0
+        return false
+    end
+
+    local distance = Feature.getRollStationDistance()
+    if not distance or distance <= (tonumber(Config.roll.stationReturnDistance) or 12.0) then
+        State.rollAwaySince = 0
+        return false
+    end
+
+    local now = os.clock()
+    if (State.rollAwaySince or 0) <= 0 then
+        State.rollAwaySince = now
+        return false
+    end
+    if now - (State.rollAwaySince or 0) < (tonumber(Config.roll.stationReturnDelay) or 12.0) then
+        return false
+    end
+
+    State.rollAwaySince = now
+    if Feature.returnToRollStation() then
+        State.rollAwaySince = 0
+        State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + 0.25)
+        Log.push("Returned to Roll station.")
+        return true
+    end
+    return false
 end
 
 function Feature.rollOnceWithoutMovement()
@@ -5831,6 +5882,10 @@ function Feature.autoRollStep()
 
     if State.pendingBuy then
         Feature.autoBuyStep()
+        return
+    end
+
+    if Feature.returnToRollStationIfAway() then
         return
     end
 
