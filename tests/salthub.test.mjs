@@ -489,6 +489,12 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(pickupAllBody, /State\.scanUnits\(\)/);
   assert.match(pickupAllBody, /unit\.placed/);
   assert.match(pickupAllBody, /Feature\.pickupShenronDoombringerPlacedUnit\(unit\)/);
+  assert.match(pickupAllBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.match(prepareBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.ok(
+    prepareBody.indexOf("if Feature.isWaveStarted() then") < prepareBody.indexOf("Feature.pickupShenronDoombringerUnits()"),
+    "Doombringer prep must wait for the wave to end before picking up placed units",
+  );
   assert.match(prepareBody, /Feature\.pickupShenronDoombringerUnits\(\)/);
   assert.match(prepareBody, /Feature\.getShenronDoombringerCandidates\(\)/);
   assert.match(prepareBody, /State\.getUnitById\(candidate\.unit\.id\)/);
@@ -566,10 +572,16 @@ test("auto Shenron ignores Dragonborn decoration dragon balls", () => {
   const ballNameBody = source.match(/function Feature\.getShenronDragonBallName\(instance\)([\s\S]*?)function Feature\.isShenronCollectPrompt/)?.[1] ?? "";
   const promptBody = source.match(/function Feature\.getShenronCollectPrompt\(instance\)([\s\S]*?)function Feature\.refreshShenronDragonBallCache/)?.[1] ?? "";
   const refreshBody = source.match(/function Feature\.refreshShenronDragonBallCache\(\)([\s\S]*?)function Feature\.getShenronDragonBalls/)?.[1] ?? "";
+  const getBallsBody = source.match(/function Feature\.getShenronDragonBalls\(\)([\s\S]*?)function Feature\.detectCarriedShenronDragonBall/)?.[1] ?? "";
+  const actionableBody = source.match(/function Feature\.hasActionableShenronWork\(\)([\s\S]*?)function Feature\.shouldPauseShenronForAutoMerge/)?.[1] ?? "";
+  const shouldRunBody = source.match(/function Feature\.shouldRunAutoShenron\(\)([\s\S]*?)function Feature\.autoShenronStep/)?.[1] ?? "";
+  const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoShenronStep\(\)([\s\S]*?)function Feature\.toggleShenron/)?.[1] ?? "";
 
   assert.match(source, /function Feature\.isShenronDecorationDragonBall/);
   assert.match(source, /function Feature\.isMutationStuffsShenronDragonBallRoot/);
   assert.match(source, /function Feature\.isShenronPromptScanBoundary/);
+  assert.match(source, /function Feature\.shouldRunAutoShenron/);
   assert.match(source, /instance == workspace:FindFirstChild\("MutationStuffs"\)/);
   assert.match(source, /instance == workspace:FindFirstChild\("ShenronDragonBalls"\)/);
   assert.match(source, /textMatchesAny\(current\.Name, \{ "Design", "Decoration", "Decor", "Visual", "VFX", "Effect" \}\)/);
@@ -580,6 +592,16 @@ test("auto Shenron ignores Dragonborn decoration dragon balls", () => {
   assert.match(promptBody, /Feature\.isShenronPromptScanBoundary\(current\.Parent\)/);
   assert.match(refreshBody, /local ballName = Feature\.getShenronDragonBallName\(instance\)/);
   assert.doesNotMatch(refreshBody, /tostring\(instance\.Name or ""\):match\("DragonBall%d"\)/);
+  assert.match(getBallsBody, /if not Feature\.isSuperShenronEventActive\(\) then/);
+  assert.match(getBallsBody, /State\.shenronDragonBalls = \{\}/);
+  assert.match(getBallsBody, /return \{\}/);
+  assert.match(actionableBody, /not Feature\.isSuperShenronEventActive\(\)/);
+  assert.match(actionableBody, /not Feature\.isShenronMeteorCollectionActive\(\)/);
+  assert.match(shouldRunBody, /Feature\.isShenronMeteorCollectionActive\(\)/);
+  assert.match(shouldRunBody, /Feature\.isSuperShenronEventActive\(\)/);
+  assert.match(shouldRunBody, /Waiting for Super Shenron event/);
+  assert.match(turnInBody, /if not Feature\.isSuperShenronEventActive\(\) then[\s\S]*?return false/);
+  assert.match(stepBody, /if not Feature\.shouldRunAutoShenron\(\) then[\s\S]*?return false/);
 });
 
 test("auto Shenron collects meteor rain pickups after a meteor wish", () => {
@@ -1121,12 +1143,13 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.doesNotMatch(toggleBody, /Feature\.returnToRollStation\(\)/);
 });
 
-test("auto roll and new auto buys pause while Boorus owns movement", () => {
+test("auto roll and new auto buys pause while waves or Boorus own movement", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const pauseBody = source.match(/function Feature\.shouldPauseRollForBoorus\(\)([\s\S]*?)\nfunction Feature\.autoRollStep/)?.[1] ?? "";
   const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nfunction Feature\.shouldPauseRollForBoorus/)?.[1] ?? "";
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nfunction Feature\.describeRolledCharacters/)?.[1] ?? "";
   const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nfunction Feature\.toggleAutoBuy/)?.[1] ?? "";
+  const shouldRollBody = source.match(/function Feature\.shouldRollAgain\(\)([\s\S]*?)\nfunction Feature\.autoBuyStep/)?.[1] ?? "";
 
   assert.match(source, /function Feature\.shouldPauseRollForBoorus/);
   assert.match(pauseBody, /Config\.flags\.autoBoorus ~= true/);
@@ -1136,12 +1159,18 @@ test("auto roll and new auto buys pause while Boorus owns movement", () => {
   assert.match(pauseBody, /Feature\.isBoorusChallengeActive\(\)/);
   assert.match(pauseBody, /Feature\.isBoorusChallengeReady\(\)/);
   assert.match(delayBody, /Feature\.shouldPauseRollForBoorus\(\)/);
+  assert.match(rollBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return/);
+  assert.ok(rollBody.indexOf("Feature.isWaveStarted()") < rollBody.indexOf("State.pendingBuy"));
+  assert.ok(rollBody.indexOf("Feature.isWaveStarted()") < rollBody.indexOf("Feature.rollOnce()"));
   assert.match(rollBody, /if Feature\.shouldPauseRollForBoorus\(\) then[\s\S]*?return/);
   assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.reserveBuyBeforeRolling()"));
   assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.rollOnce()"));
+  assert.match(buyBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.ok(buyBody.indexOf("Feature.isWaveStarted()") < buyBody.indexOf("Feature.findPendingBuyCandidate()"));
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
   assert.ok(buyBody.indexOf("Feature.findPendingBuyCandidate()") < buyBody.indexOf("Feature.shouldPauseRollForBoorus()"));
   assert.ok(buyBody.indexOf("Feature.shouldPauseRollForBoorus()") < buyBody.indexOf("Feature.findMatchingRolledCharacter()"));
+  assert.match(shouldRollBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
 });
 
 test("auto buy supports six podium roll results with unique slot keys", () => {

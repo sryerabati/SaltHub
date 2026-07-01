@@ -5796,6 +5796,10 @@ function Feature.autoRollStep()
         return
     end
 
+    if Feature.isWaveStarted() then
+        return
+    end
+
     if State.pendingBuy then
         Feature.autoBuyStep()
         return
@@ -5870,6 +5874,9 @@ function Feature.toggleAutoRoll(value)
 end
 
 function Feature.shouldRollAgain()
+    if Feature.isWaveStarted() then
+        return false
+    end
     if State.buyingCharacter then
         return false
     end
@@ -5881,6 +5888,9 @@ end
 
 function Feature.autoBuyStep()
     if not Config.flags.autoBuy or State.buyingCharacter then
+        return false
+    end
+    if Feature.isWaveStarted() then
         return false
     end
     if os.clock() - (State.lastBuyAt or 0) < math.max(Config.safety.remoteCooldown, 0.18) then
@@ -10661,6 +10671,12 @@ function Feature.refreshShenronDragonBallCache()
 end
 
 function Feature.getShenronDragonBalls()
+    if not Feature.isSuperShenronEventActive() then
+        State.shenronDragonBalls = {}
+        State.shenronDragonBallScanAt = os.clock()
+        return {}
+    end
+
     if os.clock() - (State.shenronDragonBallScanAt or 0) < (tonumber(Config.shenron.scanInterval) or 0.65) then
         return State.shenronDragonBalls or {}
     end
@@ -10755,6 +10771,9 @@ function Feature.clearShenronHoldBackoff()
 end
 
 function Feature.hasActionableShenronWork()
+    if not Feature.isSuperShenronEventActive() and not Feature.isShenronMeteorCollectionActive() then
+        return false
+    end
     if Feature.detectCarriedShenronDragonBall() then
         return true
     end
@@ -11167,6 +11186,12 @@ function Feature.pickupShenronDoombringerPlacedUnit(unit)
 end
 
 function Feature.pickupShenronDoombringerUnits()
+    if Feature.isWaveStarted() then
+        State.shenronStatus = "Doombringer target prep is waiting for the wave to end."
+        Log.push(State.shenronStatus)
+        return false
+    end
+
     State.scanUnits()
     local picked = 0
     for _, unit in ipairs(State.characters or {}) do
@@ -11184,7 +11209,16 @@ function Feature.pickupShenronDoombringerUnits()
 end
 
 function Feature.prepareShenronDoombringerWishTarget()
-    Feature.pickupShenronDoombringerUnits()
+    if Feature.isWaveStarted() then
+        State.shenronStatus = "Doombringer target prep is waiting for the wave to end."
+        Log.push(State.shenronStatus)
+        return false
+    end
+
+    if not Feature.pickupShenronDoombringerUnits() then
+        return false
+    end
+
     local candidates = Feature.getShenronDoombringerCandidates()
     local candidate = candidates[1]
     if not candidate or not candidate.unit then
@@ -11336,6 +11370,14 @@ function Feature.collectShenronMeteorDrops()
 end
 
 function Feature.turnInShenronDragonBalls()
+    if not Feature.isSuperShenronEventActive() then
+        State.shenronDragonBalls = {}
+        State.shenronDragonBallScanAt = os.clock()
+        State.shenronCollectedSinceTurnIn = 0
+        State.shenronStatus = "Waiting for Super Shenron event."
+        return false
+    end
+
     local target = Feature.getShenronTurnInTarget()
     if not target then
         Feature.setShenronHoldBackoff("Shenron turn-in target is not visible yet.")
@@ -11407,9 +11449,28 @@ function Feature.getAutoShenronLoopDelay()
     return tonumber(Config.delays.event) or 1
 end
 
+function Feature.shouldRunAutoShenron()
+    if Feature.isShenronMeteorCollectionActive() then
+        return true
+    end
+    if Feature.isSuperShenronEventActive() then
+        return true
+    end
+
+    State.shenronDragonBalls = {}
+    State.shenronDragonBallScanAt = os.clock()
+    State.shenronCollectedSinceTurnIn = 0
+    State.shenronStatus = "Waiting for Super Shenron event."
+    return false
+end
+
 function Feature.autoShenronStep()
     if Feature.useLuckPotionForSuperShenronIfReady() then
         return true
+    end
+
+    if not Feature.shouldRunAutoShenron() then
+        return false
     end
 
     if Feature.shouldPauseShenronForAutoMerge() then
