@@ -11186,6 +11186,36 @@ function Feature.prepareShenronDoombringerWishTarget()
     return false
 end
 
+function Feature.restoreBestLineupAfterShenronDoombringer()
+    if Feature.isWaveStarted() then
+        State.shenronStatus = "Doombringer wish claimed; best lineup restore is waiting for the wave to end."
+        Log.push(State.shenronStatus)
+        return false
+    end
+
+    State.autoMergeIdleUntil = math.max(
+        tonumber(State.autoMergeIdleUntil) or 0,
+        os.clock() + math.max(tonumber(Config.delays.bestLineup) or 6.0, 3.0)
+    )
+    State.shenronStatus = "Restoring best lineup after Doombringer wish."
+    Log.push(State.shenronStatus)
+
+    task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.35))
+    local ok = Feature.placeBestLineup()
+    State.autoMergeIdleUntil = math.max(
+        tonumber(State.autoMergeIdleUntil) or 0,
+        os.clock() + math.max(tonumber(Config.delays.mergeIdle) or 2.5, 1.0)
+    )
+
+    if ok then
+        State.shenronStatus = "Restored best lineup after Doombringer wish."
+    else
+        State.shenronStatus = "Doombringer wish claimed; best lineup restore did not place units."
+    end
+    Log.push(State.shenronStatus)
+    return ok
+end
+
 function Feature.isShenronMeteorWish(wishName)
     return normalizeText(wishName) == normalizeText("MeteorRain")
 end
@@ -11307,7 +11337,8 @@ function Feature.turnInShenronDragonBalls()
         task.wait(0.12)
     end
 
-    if Feature.isShenronDoombringerWish(wishName) and not Feature.prepareShenronDoombringerWishTarget() then
+    local doombringerWish = Feature.isShenronDoombringerWish(wishName)
+    if doombringerWish and not Feature.prepareShenronDoombringerWishTarget() then
         return false
     end
 
@@ -11325,6 +11356,9 @@ function Feature.turnInShenronDragonBalls()
             State.shenronStatus = "Shenron wish claimed: " .. tostring(wishName) .. "."
         end
         Log.push(State.shenronStatus)
+        if doombringerWish then
+            Feature.restoreBestLineupAfterShenronDoombringer()
+        end
     else
         State.shenronStatus = "Shenron wish claim remote was not available."
     end

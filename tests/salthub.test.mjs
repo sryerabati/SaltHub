@@ -454,7 +454,8 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   const eligibleBody = source.match(/function Feature\.isShenronDoombringerTargetTrait\(traitName\)([\s\S]*?)\nfunction Feature\.getShenronDoombringerCandidates/)?.[1] ?? "";
   const candidatesBody = source.match(/function Feature\.getShenronDoombringerCandidates\(\)([\s\S]*?)\nfunction Feature\.pickupShenronDoombringerPlacedUnit/)?.[1] ?? "";
   const pickupAllBody = source.match(/function Feature\.pickupShenronDoombringerUnits\(\)([\s\S]*?)\nfunction Feature\.prepareShenronDoombringerWishTarget/)?.[1] ?? "";
-  const prepareBody = source.match(/function Feature\.prepareShenronDoombringerWishTarget\(\)([\s\S]*?)\nfunction Feature\.isShenronMeteorWish/)?.[1] ?? "";
+  const prepareBody = source.match(/function Feature\.prepareShenronDoombringerWishTarget\(\)([\s\S]*?)\nfunction Feature\.restoreBestLineupAfterShenronDoombringer/)?.[1] ?? "";
+  const restoreBody = source.match(/function Feature\.restoreBestLineupAfterShenronDoombringer\(\)([\s\S]*?)\nfunction Feature\.isShenronMeteorWish/)?.[1] ?? "";
   const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
 
   assert.match(source, /doombringerSkipTraits = \{ "Omnipotent", "Corrupted", "Doombringer" \}/);
@@ -465,6 +466,7 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(source, /function Feature\.getShenronDoombringerCandidates/);
   assert.match(source, /function Feature\.pickupShenronDoombringerUnits/);
   assert.match(source, /function Feature\.prepareShenronDoombringerWishTarget/);
+  assert.match(source, /function Feature\.restoreBestLineupAfterShenronDoombringer/);
   assert.match(targetStatsBody, /Feature\.getCharacterStaticInfo\(unit and unit\.name\)/);
   assert.match(targetStatsBody, /Feature\.getMutationInfo\(unit\.mutation\)/);
   assert.match(targetStatsBody, /local mutationDamage = tonumber\(mutationInfo and mutationInfo\.DamageMultiplier\) or 1/);
@@ -491,11 +493,18 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(prepareBody, /Feature\.getShenronDoombringerCandidates\(\)/);
   assert.match(prepareBody, /State\.getUnitById\(candidate\.unit\.id\)/);
   assert.match(prepareBody, /Feature\.equipUnitForMerge\(unit\)/);
-  assert.match(turnInBody, /Feature\.isShenronDoombringerWish\(wishName\)/);
-  assert.match(turnInBody, /Feature\.prepareShenronDoombringerWishTarget\(\)/);
+  assert.match(restoreBody, /State\.autoMergeIdleUntil = math\.max/);
+  assert.match(restoreBody, /Feature\.placeBestLineup\(\)/);
+  assert.match(turnInBody, /local doombringerWish = Feature\.isShenronDoombringerWish\(wishName\)/);
+  assert.match(turnInBody, /if doombringerWish and not Feature\.prepareShenronDoombringerWishTarget\(\) then/);
+  assert.match(turnInBody, /if doombringerWish then\s+Feature\.restoreBestLineupAfterShenronDoombringer\(\)/);
   assert.ok(
     turnInBody.indexOf("Feature.prepareShenronDoombringerWishTarget()") < turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)'),
     "Doombringer target must be held before ClaimWish fires",
+  );
+  assert.ok(
+    turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)') < turnInBody.indexOf("Feature.restoreBestLineupAfterShenronDoombringer()"),
+    "Best lineup restore must happen only after the Doombringer wish claim succeeds",
   );
 });
 
