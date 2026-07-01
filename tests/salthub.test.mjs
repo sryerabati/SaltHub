@@ -899,6 +899,7 @@ test("auto roll scans owned podium characters and uses E-hold prompts", () => {
   assert.match(source, /function Feature\.moveNearInstance/);
   assert.match(source, /function Feature\.returnToRollStation/);
   assert.match(source, /function Feature\.rollOnce/);
+  assert.match(source, /function Feature\.rollOnceWithoutMovement/);
   assert.match(source, /function Feature\.shouldRollAgain/);
   assert.match(source, /function Feature\.autoBuyStep/);
   assert.match(source, /function Feature\.toggleAutoBuy/);
@@ -1105,7 +1106,7 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   const setPendingBody = source.match(/function Feature\.setPendingBuy\(entry\)([\s\S]*?)\nend/)?.[1] ?? "";
   const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const rollOnceBody = source.match(/function Feature\.rollOnce\(\)([\s\S]*?)\nend/)?.[1] ?? "";
-  const shouldRollBody = source.match(/function Feature\.shouldRollAgain\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const shouldRollBody = source.match(/function Feature\.shouldRollAgain\([^)]*\)([\s\S]*?)\nend/)?.[1] ?? "";
   const autoRollSafetyBody = source.match(/local function applyAutoRollTimingSafetyDefaults\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   const importBody = source.match(/function Feature\.importConfig\(text\)([\s\S]*?)\nend/)?.[1] ?? "";
 
@@ -1149,7 +1150,8 @@ test("auto roll and new auto buys pause while waves or Boorus own movement", () 
   const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nfunction Feature\.shouldPauseRollForBoorus/)?.[1] ?? "";
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nfunction Feature\.describeRolledCharacters/)?.[1] ?? "";
   const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nfunction Feature\.toggleAutoBuy/)?.[1] ?? "";
-  const shouldRollBody = source.match(/function Feature\.shouldRollAgain\(\)([\s\S]*?)\nfunction Feature\.autoBuyStep/)?.[1] ?? "";
+  const shouldRollBody = source.match(/function Feature\.shouldRollAgain\([^)]*\)([\s\S]*?)\nfunction Feature\.autoBuyStep/)?.[1] ?? "";
+  const inPlaceRollBody = source.match(/function Feature\.rollOnceWithoutMovement\(\)([\s\S]*?)\nfunction Feature\.rollOnce/)?.[1] ?? "";
 
   assert.match(source, /function Feature\.shouldPauseRollForBoorus/);
   assert.match(pauseBody, /Config\.flags\.autoBoorus ~= true/);
@@ -1159,9 +1161,16 @@ test("auto roll and new auto buys pause while waves or Boorus own movement", () 
   assert.match(pauseBody, /Feature\.isBoorusChallengeActive\(\)/);
   assert.match(pauseBody, /Feature\.isBoorusChallengeReady\(\)/);
   assert.match(delayBody, /Feature\.shouldPauseRollForBoorus\(\)/);
-  assert.match(rollBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return/);
-  assert.ok(rollBody.indexOf("Feature.isWaveStarted()") < rollBody.indexOf("State.pendingBuy"));
-  assert.ok(rollBody.indexOf("Feature.isWaveStarted()") < rollBody.indexOf("Feature.rollOnce()"));
+  assert.match(inPlaceRollBody, /Feature\.isPromptWithinActivationRange\(prompt, 0\.35\)/);
+  assert.match(inPlaceRollBody, /Feature\.holdPrompt\(prompt\)/);
+  assert.match(inPlaceRollBody, /State\.lastRollAt = os\.clock\(\)/);
+  assert.doesNotMatch(inPlaceRollBody, /Feature\.moveToPromptNaturally/);
+  assert.match(rollBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?Feature\.shouldRollAgain\(true\)[\s\S]*?Feature\.rollOnceWithoutMovement\(\)[\s\S]*?return/);
+  const waveInPlaceIndex = rollBody.indexOf("Feature.shouldRollAgain(true)");
+  assert.ok(rollBody.indexOf("State.pendingBuy") < waveInPlaceIndex);
+  assert.ok(rollBody.indexOf("Feature.shouldHoldPityForEvent()") < waveInPlaceIndex);
+  assert.ok(waveInPlaceIndex < rollBody.indexOf("Feature.reserveBuyBeforeRolling()"));
+  assert.ok(waveInPlaceIndex < rollBody.indexOf("Feature.rollOnce()"));
   assert.match(rollBody, /if Feature\.shouldPauseRollForBoorus\(\) then[\s\S]*?return/);
   assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.reserveBuyBeforeRolling()"));
   assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.rollOnce()"));
@@ -1170,7 +1179,7 @@ test("auto roll and new auto buys pause while waves or Boorus own movement", () 
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
   assert.ok(buyBody.indexOf("Feature.findPendingBuyCandidate()") < buyBody.indexOf("Feature.shouldPauseRollForBoorus()"));
   assert.ok(buyBody.indexOf("Feature.shouldPauseRollForBoorus()") < buyBody.indexOf("Feature.findMatchingRolledCharacter()"));
-  assert.match(shouldRollBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.match(shouldRollBody, /allowDuringWave ~= true/);
 });
 
 test("auto buy supports six podium roll results with unique slot keys", () => {
@@ -2142,6 +2151,7 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
 
   assert.match(source, /buhara = \{/);
   assert.match(source, /foodNames = \{ "Steak", "Tomato", "Bread", "Cheese", "Lettuce", "Trait Shard" \}/);
+  assert.match(source, /eventNames = \{ "Buhara", "Burah", "BuharaEvent" \}/);
   assert.match(source, /feedTargetNames = \{ "Buhara", "Burah", "BURAH", "BuharaEvent" \}/);
   assert.match(source, /feedDistance = 1\.1/);
   assert.match(source, /scanInterval = 0\.65/);
@@ -2170,6 +2180,8 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /function Feature\.getBuharaLegCenter/);
   assert.match(source, /function Feature\.moveToBuharaFeedPrompt/);
   assert.match(source, /function Feature\.feedBuhara/);
+  assert.match(source, /function Feature\.isBuharaEventActive/);
+  assert.match(source, /function Feature\.shouldRunAutoBuhara/);
   assert.match(source, /function Feature\.autoBuharaStep/);
   assert.match(source, /FoodNeeded/);
   assert.match(source, /CarryingFood/);
@@ -2185,6 +2197,15 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /Feature\.tryBuharaPrompt\(prompt\)/);
   assert.match(source, /return not Feature\.isCarryingBuharaFood\(\)/);
   assert.match(source, /Feature\.startLoop\("autoBuhara"[\s\S]*Feature\.autoBuharaStep/);
+
+  const shouldRunBody = source.match(/function Feature\.shouldRunAutoBuhara\(\)([\s\S]*?)\nfunction Feature\.getAutoBuharaLoopDelay/)?.[1] ?? "";
+  const delayBody = source.match(/function Feature\.getAutoBuharaLoopDelay\(\)([\s\S]*?)\nfunction Feature\.feedBuhara/)?.[1] ?? "";
+  const stepBody = source.match(/function Feature\.autoBuharaStep\(\)([\s\S]*?)\nfunction Feature\.toggleBuhara/)?.[1] ?? "";
+  assert.match(shouldRunBody, /Feature\.isBuharaEventActive\(\)/);
+  assert.match(shouldRunBody, /Feature\.isCarryingBuharaFood\(\)/);
+  assert.match(delayBody, /if not Feature\.shouldRunAutoBuhara\(\) then[\s\S]*?return math\.max/);
+  assert.match(stepBody, /if not Feature\.shouldRunAutoBuhara\(\) then[\s\S]*?return false/);
+  assert.ok(stepBody.indexOf("Feature.shouldRunAutoBuhara()") < stepBody.indexOf("Feature.getBuharaData()"));
 
   const buharaToggle = source.match(/function Feature\.toggleBuhara\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(buharaToggle, /Remote\.fire\("BuharaDropFood"\)/);

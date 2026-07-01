@@ -204,6 +204,7 @@ local Config = {
     },
     buhara = {
         foodNames = { "Steak", "Tomato", "Bread", "Cheese", "Lettuce", "Trait Shard" },
+        eventNames = { "Buhara", "Burah", "BuharaEvent" },
         feedTargetNames = { "Buhara", "Burah", "BURAH", "BuharaEvent" },
         foodCollectDistance = 2.2,
         feedDistance = 1.1,
@@ -4989,6 +4990,26 @@ function Feature.holdPromptNaturally(prompt)
     return Feature.holdPrompt(prompt)
 end
 
+function Feature.rollOnceWithoutMovement()
+    local prompt = Feature.getRollPrompt()
+    if not prompt then
+        Log.push("RollPrompt was not found on your plot.")
+        return false
+    end
+
+    if not Feature.isPromptWithinActivationRange(prompt, 0.35) then
+        return false
+    end
+
+    local ok = Feature.holdPrompt(prompt)
+    if ok then
+        State.lastRollAt = os.clock()
+        State.rollBusyUntil = State.lastRollAt + Feature.getRollSettleDelay()
+        Log.push("Held E on Roll.")
+    end
+    return ok
+end
+
 function Feature.rollOnce()
     local prompt = Feature.getRollPrompt()
     if not prompt then
@@ -5796,12 +5817,10 @@ function Feature.autoRollStep()
         return
     end
 
-    if Feature.isWaveStarted() then
-        return
-    end
-
     if State.pendingBuy then
-        Feature.autoBuyStep()
+        if not Feature.isWaveStarted() then
+            Feature.autoBuyStep()
+        end
         return
     end
 
@@ -5815,6 +5834,13 @@ function Feature.autoRollStep()
     end
 
     State.pityHoldUntil = 0
+
+    if Feature.isWaveStarted() then
+        if Feature.shouldRollAgain(true) then
+            Feature.rollOnceWithoutMovement()
+        end
+        return
+    end
 
     if Feature.shouldPauseRollForBoorus() then
         State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + math.max(tonumber(Config.delays.event) or 1, 1))
@@ -5873,8 +5899,8 @@ function Feature.toggleAutoRoll(value)
     end
 end
 
-function Feature.shouldRollAgain()
-    if Feature.isWaveStarted() then
+function Feature.shouldRollAgain(allowDuringWave)
+    if Feature.isWaveStarted() and allowDuringWave ~= true then
         return false
     end
     if State.buyingCharacter then
@@ -10369,9 +10395,61 @@ function Feature.shouldPauseBuharaForAutoMerge()
     return Config.flags.autoMerge == true
 end
 
+function Feature.getBuharaEventNames()
+    return Config.buhara.eventNames or { "Buhara", "Burah", "BuharaEvent" }
+end
+
+function Feature.isBuharaEventActive()
+    local eventNames = DataSource.expandSnipeEventNames(Feature.getBuharaEventNames())
+    if not listHasItems(eventNames) then
+        return false
+    end
+
+    if State.activeEventText ~= ""
+        and os.clock() - (State.lastEventUiAt or 0) < 180
+        and textMatchesAny(State.activeEventText, eventNames)
+        and Feature.isSelectedEventPayloadText(State.activeEventText, eventNames) then
+        return true
+    end
+
+    local eventText = Feature.scanEventTextForNames(eventNames)
+    if eventText ~= "" then
+        State.activeEventText = eventText
+        State.lastEventUiAt = os.clock()
+        return true
+    end
+
+    State.scanGuiText()
+    if Feature.isEventStatusText(State.waveStatus) and textMatchesAny(State.waveStatus, eventNames) then
+        return true
+    end
+
+    local main = PlayerGui:FindFirstChild("MainUI")
+    local frames = main and main:FindFirstChild("Frames")
+    return Feature.textRootHasSelectedEvent(frames and frames:FindFirstChild("Events"), eventNames)
+end
+
+function Feature.shouldRunAutoBuhara()
+    if Feature.isBuharaEventActive() then
+        return true
+    end
+    if Feature.isCarryingBuharaFood() then
+        return true
+    end
+
+    State.buharaFoodDrops = {}
+    State.buharaFoodScanAt = os.clock()
+    State.buharaTarget = nil
+    State.buharaTargetScanAt = os.clock()
+    return false
+end
+
 function Feature.getAutoBuharaLoopDelay()
     if Feature.shouldPauseBuharaForAutoMerge() then
         return math.max(tonumber(Config.delays.mergeIdle) or 2.5, tonumber(Config.delays.event) or 1)
+    end
+    if not Feature.shouldRunAutoBuhara() then
+        return math.max(tonumber(Config.buhara.holdPoll) or 4.0, tonumber(Config.delays.event) or 1)
     end
 
     local now = os.clock()
@@ -10416,6 +10494,9 @@ end
 
 function Feature.autoBuharaStep()
     if Feature.shouldPauseBuharaForAutoMerge() then
+        return false
+    end
+    if not Feature.shouldRunAutoBuhara() then
         return false
     end
 
