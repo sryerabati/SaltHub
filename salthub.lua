@@ -213,7 +213,6 @@ local Config = {
         feedRetries = 3,
         scanInterval = 0.65,
         dataPollInterval = 1.0,
-        dropInterval = 1.5,
         holdPoll = 4.0,
         holdLogInterval = 8.0,
         maxScanItems = 450,
@@ -786,7 +785,6 @@ local Remote = {
         EventUI = { "ReplicatedStorage", "Remotes", "Events", "EventUI" },
         FragmentRainCollect = { "ReplicatedStorage", "Remotes", "FragmentRain", "Collect" },
         BuharaData = { "ReplicatedStorage", "Remotes", "BuharaEvent", "BuharaEventGetData" },
-        BuharaDropFood = { "ReplicatedStorage", "Remotes", "BuharaEvent", "DropFood" },
         BuharaMessage = { "ReplicatedStorage", "Remotes", "BuharaEvent", "CreateBuharaMessage" },
         SuperShenronClaimWish = { "ReplicatedStorage", "Remotes", "SuperShenronEvent", "ClaimWish" },
         UsePotion = { "ReplicatedStorage", "Remotes", "Items", "UsePotion" },
@@ -966,7 +964,6 @@ local State = {
     buharaFoodScanAt = 0,
     buharaTarget = nil,
     buharaTargetScanAt = 0,
-    buharaDropAt = 0,
     buharaHoldUntil = 0,
     lastBuharaHoldLogAt = 0,
     lastBestLineupSummary = "",
@@ -10039,20 +10036,6 @@ function Feature.areBuharaRequirementsReady(data)
     return true
 end
 
-function Feature.dropBuharaFoodIfReady(data)
-    if Feature.isCarryingBuharaFood() or not Feature.areBuharaRequirementsReady(data) then
-        return false
-    end
-
-    local interval = math.max(tonumber(Config.buhara.dropInterval) or 1.5, 0.5)
-    if os.clock() - (State.buharaDropAt or 0) < interval then
-        return false
-    end
-
-    State.buharaDropAt = os.clock()
-    return Remote.fire("BuharaDropFood")
-end
-
 function Feature.getBuharaCanonicalFoodName(value)
     for _, foodName in ipairs(Config.buhara.foodNames) do
         if textMatchesAny(value, { foodName }) then
@@ -10548,19 +10531,19 @@ function Feature.getAutoBuharaLoopDelay()
     return Config.delays.event
 end
 
-function Feature.dropCarriedBuharaFood(target)
+function Feature.giveCarriedBuharaFood(target, prompt)
     if not Feature.isCarryingBuharaFood() then
         return false
     end
-    if not target then
+    if not target or not prompt then
         return false
     end
-    if not Feature.moveToBuharaFeedPrompt(target, nil) then
+    if not Feature.moveToBuharaFeedPrompt(target, prompt) then
         return false
     end
 
     task.wait(0.08)
-    Remote.fire("BuharaDropFood")
+    Feature.tryBuharaPrompt(prompt)
     task.wait(0.2)
     return not Feature.isCarryingBuharaFood()
 end
@@ -10579,9 +10562,16 @@ function Feature.feedBuhara(forceAttempt)
         return false
     end
 
+    local prompt = Feature.getBuharaFeedPrompt(target)
+    if not prompt then
+        Feature.moveToBuharaFeedPrompt(target, nil)
+        Feature.setBuharaHoldBackoff("Buhara feed prompt was not found yet; holding food.")
+        return false
+    end
+
     Feature.clearBuharaHoldBackoff()
     for attempt = 1, math.max(tonumber(Config.buhara.feedRetries) or 1, 1) do
-        if Feature.dropCarriedBuharaFood(target) then
+        if Feature.giveCarriedBuharaFood(target, prompt) then
             Feature.clearBuharaHoldBackoff()
             return true
         end
@@ -10603,13 +10593,8 @@ function Feature.autoBuharaStep()
 
     Feature.clearBuharaHoldBackoff()
     local data = Feature.getBuharaData()
-    if Feature.areBuharaRequirementsReady(data) then
-        if Feature.dropBuharaFoodIfReady(data) then
-            task.wait(0.2)
-        end
-        if Feature.feedBuhara(true) then
-            return true
-        end
+    if Feature.areBuharaRequirementsReady(data) and Feature.feedBuhara(true) then
+        return true
     end
 
     local wantedFoods = Feature.getBuharaWantedFoods(data)

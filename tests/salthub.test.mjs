@@ -2156,12 +2156,14 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /feedDistance = 1\.1/);
   assert.match(source, /scanInterval = 0\.65/);
   assert.match(source, /dataPollInterval = 1\.0/);
-  assert.match(source, /dropInterval = 1\.5/);
   assert.match(source, /buharaDataScanAt = 0/);
   assert.match(source, /function Feature\.getBuharaData/);
   assert.match(source, /function Feature\.getBuharaWantedFoods/);
   assert.match(source, /function Feature\.areBuharaRequirementsReady/);
-  assert.match(source, /function Feature\.dropBuharaFoodIfReady/);
+  assert.doesNotMatch(source, /BuharaDropFood/);
+  assert.doesNotMatch(source, /DropFood/);
+  assert.doesNotMatch(source, /dropBuharaFoodIfReady/);
+  assert.doesNotMatch(source, /buharaDropAt/);
   assert.match(source, /function Feature\.getBuharaFoodName/);
   assert.match(source, /function Feature\.getBuharaScanRoots/);
   assert.match(source, /"MutationStuffs"/);
@@ -2195,12 +2197,12 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
   assert.match(source, /CarryingFood/);
   assert.match(source, /quantity\.Text/);
   assert.match(source, /slot\.complete ~= true/);
-  assert.match(source, /Remote\.fire\("BuharaDropFood"\)/);
-  assert.match(source, /Feature\.dropBuharaFoodIfReady\(data\)/);
+  assert.doesNotMatch(source, /Remote\.fire\("BuharaDropFood"\)/);
+  assert.doesNotMatch(source, /Feature\.dropBuharaFoodIfReady\(data\)/);
   assert.match(source, /Feature\.feedBuhara\(true\)/);
   assert.match(source, /textMatchesAny\(child\.Name, \{ "Food", "Ingredient", "Sandwich", "Buhara", "Burah", "Trait", "Shard" \}\)/);
   assert.match(source, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
-  assert.match(source, /function Feature\.dropCarriedBuharaFood/);
+  assert.match(source, /function Feature\.giveCarriedBuharaFood/);
   assert.match(source, /return not Feature\.isCarryingBuharaFood\(\)/);
   assert.match(source, /Feature\.startLoop\("autoBuhara"[\s\S]*Feature\.autoBuharaStep/);
 
@@ -2232,20 +2234,19 @@ test("auto buhara reads wanted food and teleports instead of blind dropping", ()
 
   const buharaToggle = source.match(/function Feature\.toggleBuhara\(value\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(buharaToggle, /Remote\.fire\("BuharaDropFood"\)/);
-  const carriedDropBody = source.match(/function Feature\.dropCarriedBuharaFood\(target\)([\s\S]*?)\nfunction Feature\.feedBuhara/)?.[1] ?? "";
-  assert.match(carriedDropBody, /Feature\.isCarryingBuharaFood\(\)/);
-  assert.match(carriedDropBody, /Feature\.moveToBuharaFeedPrompt\(target, nil\)/);
-  assert.match(carriedDropBody, /Remote\.fire\("BuharaDropFood"\)/);
-  assert.match(carriedDropBody, /return not Feature\.isCarryingBuharaFood\(\)/);
+  const carriedGiveBody = source.match(/function Feature\.giveCarriedBuharaFood\(target, prompt\)([\s\S]*?)\nfunction Feature\.feedBuhara/)?.[1] ?? "";
+  assert.match(carriedGiveBody, /Feature\.isCarryingBuharaFood\(\)/);
+  assert.match(carriedGiveBody, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
+  assert.match(carriedGiveBody, /Feature\.tryBuharaPrompt\(prompt\)/);
+  assert.doesNotMatch(carriedGiveBody, /Remote\.fire\("BuharaDropFood"\)/);
+  assert.match(carriedGiveBody, /return not Feature\.isCarryingBuharaFood\(\)/);
   const feedBody = source.match(/function Feature\.feedBuhara\(forceAttempt\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.doesNotMatch(feedBody, /Remote\.fire\("BuharaDropFood"\)/);
   assert.match(feedBody, /not forceAttempt and not Feature\.isCarryingBuharaFood\(\)/);
   assert.match(feedBody, /local target = Feature\.findBuharaTarget\(\)/);
+  assert.match(feedBody, /local prompt = Feature\.getBuharaFeedPrompt\(target\)/);
+  assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara feed prompt was not found yet; holding food\."\)/);
   assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara target is not visible yet; holding food\."\)/);
-  const dropBody = source.match(/function Feature\.dropBuharaFoodIfReady\(data\)([\s\S]*?)\nend/)?.[1] ?? "";
-  assert.match(dropBody, /Feature\.isCarryingBuharaFood\(\)/);
-  assert.match(dropBody, /Feature\.areBuharaRequirementsReady\(data\)/);
-  assert.match(dropBody, /State\.buharaDropAt/);
   const buharaBody = source.match(/function Feature\.getBuharaData\(\)([\s\S]*?)function Feature\.toggleBuhara/)?.[1] ?? "";
   assert.match(buharaBody, /Feature\.teleportToBuharaObject\(drop\.instance, Config\.buhara\.foodCollectDistance\)/);
   assert.doesNotMatch(buharaBody, /for _, instance in ipairs\(workspace:GetDescendants\(\)\) do[\s\S]*?local foodName = Feature\.getBuharaFoodName\(instance\)/);
@@ -2277,11 +2278,11 @@ test("buhara collection and feeding use direct teleport positioning", () => {
   assert.doesNotMatch(feedMoveBody, /Feature\.moveToCFrame\([^)]*Config\.delays\.moveTimeout,\s*false\)/);
 
   const feedBody = source.match(/function Feature\.feedBuhara\(forceAttempt\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const carriedGiveBody = source.match(/function Feature\.giveCarriedBuharaFood\(target, prompt\)([\s\S]*?)\nfunction Feature\.feedBuhara/)?.[1] ?? "";
   assert.match(feedBody, /for attempt = 1, math\.max\(tonumber\(Config\.buhara\.feedRetries\) or 1, 1\) do/);
-  assert.match(feedBody, /Feature\.dropCarriedBuharaFood\(target\)/);
-  assert.doesNotMatch(feedBody, /Feature\.tryBuharaPrompt\(prompt\)/);
-  assert.match(source, /Feature\.moveToBuharaFeedPrompt\(target, nil\)/);
-  assert.doesNotMatch(feedBody, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
+  assert.match(feedBody, /Feature\.giveCarriedBuharaFood\(target, prompt\)/);
+  assert.match(carriedGiveBody, /Feature\.tryBuharaPrompt\(prompt\)/);
+  assert.match(source, /Feature\.moveToBuharaFeedPrompt\(target, prompt\)/);
 });
 
 test("auto buhara backs off missing target checks while holding food", () => {
@@ -2298,7 +2299,7 @@ test("auto buhara backs off missing target checks while holding food", () => {
   assert.match(source, /function Feature\.getAutoBuharaLoopDelay/);
   assert.match(source, /local holdUntil = tonumber\(State\.buharaHoldUntil\) or 0/);
   assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara target is not visible yet; holding food\."\)/);
-  assert.doesNotMatch(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara feed prompt was not found yet; holding food\."\)/);
+  assert.match(feedBody, /Feature\.setBuharaHoldBackoff\("Buhara feed prompt was not found yet; holding food\."\)/);
   assert.match(toggleBody, /Feature\.startLoop\("autoBuhara", Feature\.getAutoBuharaLoopDelay, Feature\.autoBuharaStep\)/);
   assert.doesNotMatch(toggleBody, /return Config\.delays\.event/);
 });
