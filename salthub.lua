@@ -11604,13 +11604,6 @@ function Feature.turnInShenronDragonBalls()
         return false
     end
 
-    local target = Feature.getShenronTurnInTarget()
-    if not target then
-        Feature.setShenronHoldBackoff("Shenron turn-in target is not visible yet.")
-        State.shenronStatus = "Waiting for Shenron turn-in target."
-        return false
-    end
-
     local wishName = Feature.getBestShenronWish()
     if not wishName then
         State.shenronStatus = "No unlocked non-cash Shenron wish is available."
@@ -11623,17 +11616,24 @@ function Feature.turnInShenronDragonBalls()
         return false
     end
 
+    local doombringerWish = Feature.isShenronDoombringerWish(wishName)
+    if doombringerWish and not Feature.prepareShenronDoombringerWishTarget() then
+        return false
+    end
+
+    local target = Feature.getShenronTurnInTarget()
+    if not target then
+        Feature.setShenronHoldBackoff("Shenron turn-in target is not visible yet.")
+        State.shenronStatus = "Waiting for Shenron turn-in target."
+        return false
+    end
+
     Feature.clearShenronHoldBackoff()
     for attempt = 1, math.max(tonumber(Config.shenron.turnInRetries) or 1, 1) do
         Feature.teleportToBuharaObject(target, Config.shenron.turnInDistance)
         task.wait(0.06)
         Feature.touchInstance(target)
         task.wait(0.12)
-    end
-
-    local doombringerWish = Feature.isShenronDoombringerWish(wishName)
-    if doombringerWish and not Feature.prepareShenronDoombringerWishTarget() then
-        return false
     end
 
     State.lastShenronClaimAt = os.clock()

@@ -509,6 +509,10 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
     "Doombringer target must be held before ClaimWish fires",
   );
   assert.ok(
+    turnInBody.indexOf("Feature.prepareShenronDoombringerWishTarget()") < turnInBody.indexOf("Feature.teleportToBuharaObject(target, Config.shenron.turnInDistance)"),
+    "Doombringer target prep must happen before teleporting to Shenron turn-in",
+  );
+  assert.ok(
     turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)') < turnInBody.indexOf("Feature.restoreBestLineupAfterShenronDoombringer()"),
     "Best lineup restore must happen only after the Doombringer wish claim succeeds",
   );
