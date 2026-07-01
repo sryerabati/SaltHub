@@ -4270,30 +4270,56 @@ function Feature.shouldStartWave()
     return os.clock() - (State.lastWaveStartAt or 0) >= startCooldown
 end
 
-local WAVE_CHECKPOINTS = { 0, 25, 50, 75 }
+local WAVE_CHECKPOINTS = { 0, 25, 50, 75, 100, 125, 150, 175, 200 }
 
-function Feature.getHighestWaveCheckpoint()
-    local unlocked = tonumber(LocalPlayer:GetAttribute("Checkpoint"))
-        or tonumber(Feature.dataGet("Checkpoint", nil))
-        or tonumber(Feature.dataGet("HighestWave", nil))
-        or 0
+function Feature.getWaveCheckpointFromWave(wave)
+    local highestWave = tonumber(wave) or 0
     local target = 0
     for _, checkpoint in ipairs(WAVE_CHECKPOINTS) do
-        if unlocked >= checkpoint then
+        if highestWave >= checkpoint then
             target = checkpoint
         end
     end
     return target
 end
 
-function Feature.ensureHighestWaveCheckpoint()
-    local target = Feature.getHighestWaveCheckpoint()
-    if target <= 0 then
-        return true
+function Feature.getHighestWaveCheckpoint()
+    local highestWave = tonumber(Feature.dataGet("HighestWave", nil))
+        or tonumber(LocalPlayer:GetAttribute("HighestWave"))
+        or tonumber(Feature.dataGet("MaxWave", nil))
+        or 0
+    return Feature.getWaveCheckpointFromWave(highestWave)
+end
+
+function Feature.getSelectedWaveCheckpoint()
+    local selected = tonumber(Feature.dataGet({ "Settings", "Checkpoint" }, nil))
+    if selected ~= nil then
+        return selected
     end
 
-    local selected = tonumber(Feature.dataGet({ "Settings", "Checkpoint" }, nil))
-    if selected == nil or selected == target then
+    selected = tonumber(LocalPlayer:GetAttribute("Checkpoint"))
+    if selected ~= nil then
+        return selected
+    end
+
+    local main = PlayerGui:FindFirstChild("MainUI")
+    local top = main and main:FindFirstChild("UITop")
+    local checkpointFrame = top and top:FindFirstChild("Checkpoint")
+    local checkpoint = checkpointFrame and checkpointFrame:FindFirstChild("Checkpoint")
+    local status = checkpoint and checkpoint:FindFirstChild("Status")
+    if status and (status:IsA("TextLabel") or status:IsA("TextButton")) then
+        return tonumber(status.Text)
+    end
+    return nil
+end
+
+function Feature.ensureHighestWaveCheckpoint()
+    local target = Feature.getHighestWaveCheckpoint()
+    local selected = Feature.getSelectedWaveCheckpoint()
+    if selected == target then
+        return true
+    end
+    if selected == nil and target <= 0 then
         return true
     end
 

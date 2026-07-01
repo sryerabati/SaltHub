@@ -2244,9 +2244,11 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.match(source, /function Feature\.isWaveStarted/);
   assert.match(source, /function Feature\.shouldStartWave/);
   assert.match(source, /function Feature\.getHighestWaveCheckpoint/);
+  assert.match(source, /function Feature\.getSelectedWaveCheckpoint/);
   assert.match(source, /function Feature\.ensureHighestWaveCheckpoint/);
   assert.match(source, /function Feature\.autoStartWaveStep/);
   assert.match(source, /Checkpoint = \{ "ReplicatedStorage", "Remotes", "Checkpoint" \}/);
+  assert.match(source, /local WAVE_CHECKPOINTS = \{ 0, 25, 50, 75, 100, 125, 150, 175, 200 \}/);
   assert.match(source, /plot:GetAttribute\("WaveStarted"\) == true/);
   assert.match(source, /State\.lastWaveStartAt/);
   assert.match(source, /os\.clock\(\) - \(State\.lastWaveStartAt or 0\)/);
@@ -2258,8 +2260,18 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.match(stepBody, /Remote\.fire\("StartWave"\)/);
 
   const checkpointBody = source.match(/function Feature\.ensureHighestWaveCheckpoint\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const highestBody = source.match(/function Feature\.getHighestWaveCheckpoint\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  const selectedBody = source.match(/function Feature\.getSelectedWaveCheckpoint\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(highestBody, /Feature\.dataGet\("HighestWave", nil\)/);
+  assert.match(highestBody, /LocalPlayer:GetAttribute\("HighestWave"\)/);
+  assert.doesNotMatch(highestBody, /LocalPlayer:GetAttribute\("Checkpoint"\)/);
+  assert.doesNotMatch(highestBody, /Feature\.dataGet\(\{ "Settings", "Checkpoint" \}, nil\)/);
+  assert.match(selectedBody, /Feature\.dataGet\(\{ "Settings", "Checkpoint" \}, nil\)/);
+  assert.match(selectedBody, /LocalPlayer:GetAttribute\("Checkpoint"\)/);
   assert.match(checkpointBody, /Feature\.getHighestWaveCheckpoint\(\)/);
-  assert.match(checkpointBody, /Feature\.dataGet\(\{ "Settings", "Checkpoint" \}, nil\)/);
+  assert.match(checkpointBody, /Feature\.getSelectedWaveCheckpoint\(\)/);
+  assert.match(checkpointBody, /if selected == target then[\s\S]*?return true/);
+  assert.doesNotMatch(checkpointBody, /if target <= 0 then[\s\S]*?return true/);
   assert.match(checkpointBody, /Remote\.fire\("Checkpoint"\)/);
 
   const waveTabBody = source.match(/Feature\.startLoop\("autoStartWave"[\s\S]*?\n\s*end\)/)?.[0] ?? "";
