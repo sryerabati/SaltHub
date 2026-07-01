@@ -1144,7 +1144,7 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.doesNotMatch(toggleBody, /Feature\.returnToRollStation\(\)/);
 });
 
-test("auto roll and new auto buys pause while waves or Boorus own movement", () => {
+test("auto roll stays in place during waves and new auto buys pause while Boorus owns movement", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const pauseBody = source.match(/function Feature\.shouldPauseRollForBoorus\(\)([\s\S]*?)\nfunction Feature\.autoRollStep/)?.[1] ?? "";
   const delayBody = source.match(/function Feature\.getAutoRollLoopDelay\(\)([\s\S]*?)\nfunction Feature\.shouldPauseRollForBoorus/)?.[1] ?? "";
@@ -1174,12 +1174,23 @@ test("auto roll and new auto buys pause while waves or Boorus own movement", () 
   assert.match(rollBody, /if Feature\.shouldPauseRollForBoorus\(\) then[\s\S]*?return/);
   assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.reserveBuyBeforeRolling()"));
   assert.ok(rollBody.indexOf("Feature.shouldPauseRollForBoorus()") < rollBody.indexOf("Feature.rollOnce()"));
-  assert.match(buyBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
-  assert.ok(buyBody.indexOf("Feature.isWaveStarted()") < buyBody.indexOf("Feature.findPendingBuyCandidate()"));
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
   assert.ok(buyBody.indexOf("Feature.findPendingBuyCandidate()") < buyBody.indexOf("Feature.shouldPauseRollForBoorus()"));
   assert.ok(buyBody.indexOf("Feature.shouldPauseRollForBoorus()") < buyBody.indexOf("Feature.findMatchingRolledCharacter()"));
+  assert.doesNotMatch(buyBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.doesNotMatch(buyBody, /if Feature\.isWaveCombatActive\(\) then[\s\S]*?return false/);
   assert.match(shouldRollBody, /allowDuringWave ~= true/);
+});
+
+test("auto buy can finish matching buys during wave combat", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nfunction Feature\.toggleAutoBuy/)?.[1] ?? "";
+  const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nfunction Feature\.describeRolledCharacters/)?.[1] ?? "";
+
+  assert.doesNotMatch(buyBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.doesNotMatch(buyBody, /if Feature\.isWaveCombatActive\(\) then[\s\S]*?return false/);
+  assert.match(rollBody, /if State\.pendingBuy then[\s\S]*?Feature\.autoBuyStep\(\)[\s\S]*?return/);
+  assert.doesNotMatch(rollBody, /State\.pendingBuy[\s\S]*?if not Feature\.isWaveCombatActive\(\)/);
 });
 
 test("auto buy supports six podium roll results with unique slot keys", () => {
@@ -2363,4 +2374,17 @@ test("auto start wave is gated by owned plot wave state", () => {
   assert.doesNotMatch(waveTabBody, /function\(\)\s*Remote\.fire\("StartWave"\)\s*end/);
   assert.match(source, /UI\.toggle\(controls, "Start Highest Wave"/);
   assert.doesNotMatch(source, /UI\.toggle\(controls, "Auto Skip"/);
+});
+
+test("auto start wave waits for pending auto buys", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const pauseBody = source.match(/function Feature\.shouldPauseWaveStartForAutoBuy\(\)([\s\S]*?)\nfunction Feature\.shouldStartWave/)?.[1] ?? "";
+  const shouldStartBody = source.match(/function Feature\.shouldStartWave\(\)([\s\S]*?)\nfunction Feature\.getWaveCheckpointFromWave/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.shouldPauseWaveStartForAutoBuy/);
+  assert.match(pauseBody, /Config\.flags\.autoBuy ~= true/);
+  assert.match(pauseBody, /State\.pendingBuy/);
+  assert.match(pauseBody, /Feature\.findMatchingRolledCharacter\(\)/);
+  assert.match(shouldStartBody, /Feature\.shouldPauseWaveStartForAutoBuy\(\)/);
+  assert.ok(shouldStartBody.indexOf("Feature.shouldPauseWaveStartForAutoBuy()") < shouldStartBody.indexOf("State.lastWaveStartAt"));
 });

@@ -4260,9 +4260,22 @@ function Feature.isWaveStarted()
     return plot and plot:GetAttribute("WaveStarted") == true
 end
 
+function Feature.shouldPauseWaveStartForAutoBuy()
+    if Config.flags.autoBuy ~= true then
+        return false
+    end
+    if State.buyingCharacter or State.pendingBuy then
+        return true
+    end
+    return Feature.findMatchingRolledCharacter() ~= nil
+end
+
 function Feature.shouldStartWave()
     local plot = Feature.getOwnedPlot()
     if not plot or Feature.isWaveStarted() then
+        return false
+    end
+    if Feature.shouldPauseWaveStartForAutoBuy() then
         return false
     end
 
@@ -5817,9 +5830,7 @@ function Feature.autoRollStep()
     end
 
     if State.pendingBuy then
-        if not Feature.isWaveStarted() then
-            Feature.autoBuyStep()
-        end
+        Feature.autoBuyStep()
         return
     end
 
@@ -5913,9 +5924,6 @@ end
 
 function Feature.autoBuyStep()
     if not Config.flags.autoBuy or State.buyingCharacter then
-        return false
-    end
-    if Feature.isWaveStarted() then
         return false
     end
     if os.clock() - (State.lastBuyAt or 0) < math.max(Config.safety.remoteCooldown, 0.18) then
