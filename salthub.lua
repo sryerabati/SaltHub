@@ -58,6 +58,7 @@ local Config = {
         wave = 1.5,
         roll = 0.12,
         buyScan = 0.12,
+        buyCooldown = 0.12,
         rollSettle = 1.25,
         buyReservePause = 4.0,
         fastRollRollSettle = 2.75,
@@ -69,7 +70,7 @@ local Config = {
         pityHoldPoll = 1.0,
         eventScanInterval = 4.0,
         fastForwardPulse = 10.0,
-        buyPause = 0.9,
+        buyPause = 0.18,
         moveTimeout = 1.35,
         merge = 0.8,
         mergeIdle = 2.5,
@@ -394,6 +395,8 @@ local function applyAutoRollTimingSafetyDefaults()
     Config.delays.buyReservePause = math.max(tonumber(Config.delays.buyReservePause) or 0, 4.0)
     Config.delays.buyAttemptWindow = math.max(tonumber(Config.delays.buyAttemptWindow) or 0, 8.0)
     Config.delays.buyRetryPoll = math.max(tonumber(Config.delays.buyRetryPoll) or 0, 0.35)
+    Config.delays.buyCooldown = math.min(math.max(tonumber(Config.delays.buyCooldown) or 0.12, 0.08), 0.18)
+    Config.delays.buyPause = math.min(math.max(tonumber(Config.delays.buyPause) or 0.18, 0.08), 0.18)
     Config.delays.fastRollRollSettle = math.max(tonumber(Config.delays.fastRollRollSettle or Config.delays.fastRollBuyHold) or 0, 2.75)
     Config.roll.smoothMovement = false
     Config.roll.promptTeleportFallback = true
@@ -6355,7 +6358,8 @@ function Feature.buyRolledCharacter(entry)
     if not ok then
         Log.push("Buy failed: " .. tostring(err))
     end
-    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + (tonumber(Config.delays.buyPause) or 0.9))
+    local buyPause = math.min(math.max(tonumber(Config.delays.buyPause) or 0.18, 0.08), 0.18)
+    State.rollBusyUntil = math.max(State.rollBusyUntil or 0, os.clock() + buyPause)
     State.buyingCharacter = false
     return bought
 end
@@ -6825,7 +6829,8 @@ function Feature.autoBuyStep()
     if not Config.flags.autoBuy or State.buyingCharacter then
         return false
     end
-    if os.clock() - (State.lastBuyAt or 0) < math.max(Config.safety.remoteCooldown, 0.18) then
+    local buyCooldown = math.min(math.max(tonumber(Config.delays.buyCooldown) or 0.12, 0.08), 0.18)
+    if os.clock() - (State.lastBuyAt or 0) < buyCooldown then
         return false
     end
 

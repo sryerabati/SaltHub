@@ -1270,7 +1270,8 @@ test("auto roll settles between rolls and auto buy can run independently", () =>
 
   assert.match(source, /buyScan = 0\.12/);
   assert.match(source, /rollSettle = 1\.25/);
-  assert.match(source, /buyPause = 0\.9/);
+  assert.match(source, /buyPause = 0\.18/);
+  assert.match(source, /buyCooldown = 0\.12/);
 
   const rollBody = source.match(/function Feature\.autoRollStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
   assert.match(rollBody, /if State\.buyingCharacter then[\s\S]*?return/);
@@ -1311,6 +1312,7 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.match(source, /State\.pendingBuy = \{/);
   assert.match(source, /buyReservePause = 4\.0/);
   assert.match(source, /buyRetryPoll = 0\.35/);
+  assert.match(source, /buyCooldown = 0\.12/);
   assert.match(source, /buyConfirmTimeout = 2\.5/);
   assert.match(source, /buyAttemptWindow = 8\.0/);
   assert.match(source, /expiresAt = now \+ \(tonumber\(Config\.delays\.buyAttemptWindow\) or 8\.0\)/);
@@ -1320,6 +1322,9 @@ test("auto buy waits for cash before rolling past a wanted character", () => {
   assert.doesNotMatch(source, /if pending\.expiresAt and os\.clock\(\) < pending\.expiresAt then[\s\S]*?return nil/);
 
   const buyBody = source.match(/function Feature\.autoBuyStep\(\)([\s\S]*?)\nend/)?.[1] ?? "";
+  assert.match(buyBody, /local buyCooldown = math\.min\(math\.max\(tonumber\(Config\.delays\.buyCooldown\) or 0\.12, 0\.08\), 0\.18\)/);
+  assert.match(buyBody, /if os\.clock\(\) - \(State\.lastBuyAt or 0\) < buyCooldown then/);
+  assert.doesNotMatch(buyBody, /math\.max\(Config\.safety\.remoteCooldown, 0\.18\)/);
   assert.match(buyBody, /local pending = Feature\.findPendingBuyCandidate\(\)/);
   assert.match(buyBody, /if pending then[\s\S]*?return Feature\.tryBuyRolledCharacter\(pending\)/);
   assert.match(buyBody, /if State\.pendingBuy then[\s\S]*?Feature\.extendPendingBuyHold\(\)[\s\S]*?return false/);
@@ -1364,6 +1369,8 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.match(shouldRollBody, /Feature\.getRollSettleDelay\(\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.rollSettle = math\.max\(tonumber\(Config\.delays\.rollSettle\) or 0, 1\.25\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.buyReservePause = math\.max\(tonumber\(Config\.delays\.buyReservePause\) or 0, 4\.0\)/);
+  assert.match(autoRollSafetyBody, /Config\.delays\.buyCooldown = math\.min\(math\.max\(tonumber\(Config\.delays\.buyCooldown\) or 0\.12, 0\.08\), 0\.18\)/);
+  assert.match(autoRollSafetyBody, /Config\.delays\.buyPause = math\.min\(math\.max\(tonumber\(Config\.delays\.buyPause\) or 0\.18, 0\.08\), 0\.18\)/);
   assert.match(autoRollSafetyBody, /Config\.delays\.fastRollRollSettle = math\.max\(tonumber\(Config\.delays\.fastRollRollSettle or Config\.delays\.fastRollBuyHold\) or 0, 2\.75\)/);
   assert.match(autoRollSafetyBody, /Config\.roll\.smoothMovement = false/);
   assert.match(autoRollSafetyBody, /Config\.roll\.promptTeleportFallback = true/);
@@ -1375,6 +1382,8 @@ test("auto roll reserves and moves to wanted buys before rolling again", () => {
   assert.match(buyBody, /Feature\.moveToPromptNaturally\(current\.prompt, Config\.roll\.promptDistance\)/);
   assert.match(buyBody, /Feature\.holdPromptNaturally\(current\.prompt\)/);
   assert.match(buyBody, /if prompted and Feature\.waitForRolledCharacterGone\(key, tonumber\(Config\.delays\.buyConfirmTimeout\) or 2\.5\) then/);
+  assert.match(buyBody, /local buyPause = math\.min\(math\.max\(tonumber\(Config\.delays\.buyPause\) or 0\.18, 0\.08\), 0\.18\)/);
+  assert.match(buyBody, /State\.rollBusyUntil = math\.max\(State\.rollBusyUntil or 0, os\.clock\(\) \+ buyPause\)/);
   assert.doesNotMatch(buyBody, /Feature\.returnToRollStation\(\)/);
   assert.doesNotMatch(buyBody, /Feature\.moveNearInstance\(entry\.prompt, 3\.15\)/);
   assert.doesNotMatch(buyBody, /bought = Feature\.holdPrompt\(entry\.prompt\)/);
