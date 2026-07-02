@@ -337,6 +337,7 @@ test("discord webhook only notifies important rare automation events", () => {
   const rareBody = source.match(/function Feature\.getRareWebhookReason\(event\)([\s\S]*?)\nfunction Feature\.shouldNotifyWebhookEvent/)?.[1] ?? "";
   const embedBody = source.match(/function Feature\.buildWebhookEmbed\(event\)([\s\S]*?)\nfunction Feature\.sendWebhookEventNow/)?.[1] ?? "";
   const shouldBody = source.match(/function Feature\.shouldNotifyWebhookEvent\(event\)([\s\S]*?)\nfunction Feature\.queueWebhookEvent/)?.[1] ?? "";
+  const rolledBody = source.match(/function Feature\.getRolledCharacters\(\)([\s\S]*?)\nfunction Feature\.matchesRollTarget/)?.[1] ?? "";
   const buyBody = source.match(/function Feature\.buyRolledCharacter\(entry\)([\s\S]*?)\nfunction Feature\.getRollPityEntries/)?.[1] ?? "";
   const traitBody = source.match(/function Feature\.autoTraitStep\(\)([\s\S]*?)\nfunction Feature\.getPlayerCash/)?.[1] ?? "";
   const shenronBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
@@ -358,11 +359,13 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(source, /Feature\.getRollWatchWebhookReason\(event\)/);
   const rollGateIndex = rareBody.indexOf("if Feature.isRollWebhookEvent(event) then");
   assert.notEqual(rollGateIndex, -1);
+  assert.ok(rollGateIndex < rareBody.indexOf("local trait = tostring(event.trait or event.newTrait or \"\")"));
   assert.ok(rollGateIndex < rareBody.indexOf("Feature.getSuperShenronWebhookReason"));
   assert.ok(rollGateIndex < rareBody.indexOf("Config.webhook.rareMutations"));
   assert.ok(rollGateIndex < rareBody.indexOf("Config.webhook.rareUnits"));
   assert.ok(rollGateIndex < rareBody.indexOf("Config.webhook.rareRarities"));
-  assert.match(rareBody, /if Feature\.isBoughtRollWebhookEvent\(event\) then[\s\S]*?return "bought roll: " \.\. rollName[\s\S]*?return nil/);
+  assert.match(rareBody, /if Feature\.isRollWebhookEvent\(event\) then[\s\S]*?if not Feature\.isBoughtRollWebhookEvent\(event\) then[\s\S]*?return nil[\s\S]*?local rollWatchReason = Feature\.getRollWatchWebhookReason\(event\)[\s\S]*?if rollWatchReason then[\s\S]*?return "bought roll: " \.\. rollName[\s\S]*?return nil/);
+  assert.doesNotMatch(rolledBody, /Feature\.notifyRareWebhook/);
   assert.match(rareBody, /Config\.webhook\.rareUnits/);
   assert.match(rareBody, /Config\.webhook\.rareRarities/);
   assert.match(shouldBody, /Feature\.getRareWebhookReason\(event\)/);

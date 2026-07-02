@@ -4907,25 +4907,25 @@ function Feature.getRareWebhookReason(event)
         return "Doombringer granted to " .. grantedName
     end
 
-    local trait = tostring(event.trait or event.newTrait or "")
-    if Feature.webhookTextMatchesAny(trait, Config.webhook.rareTraits) then
-        return "rare trait: " .. trait
-    end
-
     local mutation = tostring(event.mutation or "")
     local name = tostring(event.name or event.unit or "")
     local rarity = tostring(event.rarity or Feature.getWebhookCharacterRarity(name))
-    local rollWatchReason = Feature.getRollWatchWebhookReason(event)
-    if rollWatchReason then
-        return rollWatchReason
-    end
-
     if Feature.isRollWebhookEvent(event) then
-        if Feature.isBoughtRollWebhookEvent(event) then
+        if not Feature.isBoughtRollWebhookEvent(event) then
+            return nil
+        end
+
+        local rollWatchReason = Feature.getRollWatchWebhookReason(event)
+        if rollWatchReason then
             local rollName = name ~= "" and name or "selected roll"
             return "bought roll: " .. rollName
         end
         return nil
+    end
+
+    local trait = tostring(event.trait or event.newTrait or "")
+    if Feature.webhookTextMatchesAny(trait, Config.webhook.rareTraits) then
+        return "rare trait: " .. trait
     end
 
     local superShenronReason = Feature.getSuperShenronWebhookReason(mutation, rarity)
@@ -5989,15 +5989,6 @@ function Feature.getRolledCharacters()
             prompt = prompt,
         }
         table.insert(out, entry)
-        Feature.notifyRareWebhook({
-            kind = "Rare Roll",
-            source = "Roll",
-            name = entry.name,
-            mutation = entry.mutation,
-            rarity = Feature.getWebhookCharacterRarity(entry.name),
-            slotKey = entry.slotKey,
-            details = entry.price,
-        })
     end
     State.rolledCharacters = out
     return out
