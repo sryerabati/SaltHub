@@ -68,6 +68,7 @@ local Config = {
         buyPromptRetryDelay = 0.18,
         pityHoldPoll = 1.0,
         eventScanInterval = 4.0,
+        fastForwardPulse = 10.0,
         buyPause = 0.9,
         moveTimeout = 1.35,
         merge = 0.8,
@@ -173,6 +174,22 @@ local Config = {
         searchVariants = 5,
         maxPlacements = 60,
         skipEquipped = false,
+    },
+    webhook = {
+        enabled = false,
+        url = "",
+        mentionUser = false,
+        minInterval = 2.5,
+        dedupeWindow = 90.0,
+        rareTraits = { "Omnipotent", "Corrupted", "Doombringer", "Divine Eye", "Divine" },
+        rareMutations = { "God", "Divine" },
+        superShenronMutationNames = { "SuperShenron", "Super Shenron" },
+        superShenronMutationMinRarity = "Secret",
+        rollNotifyUnits = {},
+        rollNotifyMutations = {},
+        rareUnits = { "Hashirama", "Hashirama (Sage)", "Hashiromo" },
+        rareRarities = { "Secret" },
+        rareRewards = { "Doombringer", "Omnipotent", "Divine", "Divine Eye", "God", "Hashirama", "Hashiromo" },
     },
     trait = {
         selectedUnitId = "",
@@ -920,6 +937,13 @@ local State = {
     lastNativeMenuPauseLogAt = 0,
     spinStatus = "Waiting for data.",
     spinBusyUntil = 0,
+    spinWheelCompleteAttached = false,
+    webhookStatus = "Webhook disabled.",
+    webhookQueue = {},
+    webhookSeenKeys = {},
+    lastWebhookSentAt = 0,
+    webhookBackoffUntil = 0,
+    webhookLastFailureRetry = false,
     boorusStatus = "Waiting for data.",
     boorusSpinBusyUntil = 0,
     boorusSpinCompleteAttached = false,
@@ -935,15 +959,19 @@ local State = {
     shenronMeteorScanAt = 0,
     shenronMeteorCollectUntil = 0,
     lastShenronWishName = "",
+    lastShenronDoombringerTarget = nil,
     shenronHoldUntil = 0,
     lastShenronHoldLogAt = 0,
     lastShenronClaimAt = 0,
     lastShenronLuckPotionAt = 0,
     lastShenronLuckPotionLogAt = 0,
+    lastShenronWaveStopAt = 0,
     battlepassStatus = "Waiting for data.",
     vipRewardStatus = "Waiting for data.",
     waveStatus = "-",
     lastWaveStartAt = 0,
+    lastFastForwardAt = 0,
+    lastFastForwardValue = "",
     lastRollAt = 0,
     rollBusyUntil = 0,
     rollAwaySince = 0,
@@ -2688,7 +2716,7 @@ function UI.traitSelector(parent, title, optionsGetter, selectedGetter, setter, 
     }
 end
 
-function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height)
+function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height, webhookOptions)
     local frame = UI.section(parent, title)
     local summary = UI.label(frame, "", 24)
     local searchText = ""
@@ -2775,6 +2803,12 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
         commit(unitMap, mutationTargets)
     end
 
+    local lastWebhookVisible = nil
+    local lastWebhookRefresh = 0
+    local function webhookBellsVisible()
+        return webhookOptions and webhookOptions.enabled and webhookOptions.enabled() == true
+    end
+
     refresh = function()
         for _, child in ipairs(list:GetChildren()) do
             if child ~= layout then
@@ -2792,6 +2826,8 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
         end
         summary.Text = selectedCount == 0 and "No unit targets selected" or (tostring(selectedCount) .. " unit targets selected")
 
+        local showWebhookBells = webhookOptions and webhookOptions.enabled and webhookOptions.enabled() == true
+        lastWebhookVisible = showWebhookBells
         local lastRarity = nil
         local mutationSearchText = table.concat(mutationsGetter() or {}, " ")
         for index, unitValue in ipairs(unitsGetter() or {}) do
@@ -2805,6 +2841,7 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
             local selected = unitMap[unit] == true
             local mutations = mutationTargets[unit] or {}
             local open = expanded[unit] == true
+            local unitBellActive = showWebhookBells and webhookOptions.isUnitActive and webhookOptions.isUnitActive(unit) == true
 
             if rarity ~= lastRarity then
                 lastRarity = rarity
@@ -2876,7 +2913,7 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
             local unitButton = inst("TextButton", {
                 Name = "UnitButton",
                 Position = UDim2.fromOffset(84, 0),
-                Size = UDim2.new(1, -122, 1, 0),
+                Size = UDim2.new(1, showWebhookBells and -154 or -122, 1, 0),
                 BackgroundTransparency = 1,
                 Font = Enum.Font.GothamBold,
                 Text = displayName .. (#mutations == 0 and " - any mutation" or (" - " .. tostring(#mutations) .. " mutations")),
@@ -2888,6 +2925,31 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
                 padding(10),
             })
             unitButton.Parent = row
+
+            if showWebhookBells then
+                local unitBell = inst("TextButton", {
+                    Name = "UnitWebhookBell",
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -36, 0.5, 0),
+                    Size = UDim2.fromOffset(22, 22),
+                    BackgroundColor3 = unitBellActive and Theme.accent or Theme.glassPanel,
+                    BackgroundTransparency = unitBellActive and 0.05 or 0.18,
+                    BorderSizePixel = 0,
+                    Font = Enum.Font.GothamBold,
+                    Text = unitBellActive and "🔔" or "🔕",
+                    TextColor3 = Theme.text,
+                    TextSize = 12,
+                    AutoButtonColor = true,
+                }, {
+                    corner(5),
+                    stroke(unitBellActive and Theme.accent or Theme.line, 1),
+                })
+                unitBell.MouseButton1Click:Connect(function()
+                    webhookOptions.setUnit(unit, not unitBellActive)
+                    refresh()
+                end)
+                unitBell.Parent = row
+            end
 
             local caret = inst("TextButton", {
                 Name = "Caret",
@@ -2948,13 +3010,22 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
             for mutationIndex, mutationValue in ipairs(mutationsGetter() or {}) do
                 local mutation = tostring(mutationValue)
                 local mutationSelected = makeMap(mutations)[mutation] == true
-                local button = inst("TextButton", {
+                local mutationBellActive = showWebhookBells and webhookOptions.isMutationActive and webhookOptions.isMutationActive(mutation) == true
+                local mutationRow = inst("Frame", {
                     Name = mutation,
                     LayoutOrder = mutationIndex,
                     Size = UDim2.new(1, 0, 0, 24),
                     BackgroundColor3 = mutationSelected and Theme.accent2 or Theme.panel2,
                     BackgroundTransparency = mutationSelected and 0.12 or 0.18,
                     BorderSizePixel = 0,
+                }, {
+                    corner(5),
+                })
+                local button = inst("TextButton", {
+                    Name = "MutationButton",
+                    Position = UDim2.fromOffset(0, 0),
+                    Size = UDim2.new(1, showWebhookBells and -32 or 0, 1, 0),
+                    BackgroundTransparency = 1,
                     Font = Enum.Font.Gotham,
                     Text = mutation,
                     TextColor3 = Theme.text,
@@ -2962,19 +3033,54 @@ function UI.unitMutationSelector(parent, title, unitsGetter, mutationsGetter, se
                     TextXAlignment = Enum.TextXAlignment.Left,
                     AutoButtonColor = true,
                 }, {
-                    corner(5),
                     padding(22),
                 })
                 button.MouseButton1Click:Connect(function()
                     setMutation(unit, mutation, not mutationSelected)
                     refresh()
                 end)
-                button.Parent = mutationsFrame
+                button.Parent = mutationRow
+                if showWebhookBells then
+                    local mutationBell = inst("TextButton", {
+                        Name = "MutationWebhookBell",
+                        AnchorPoint = Vector2.new(1, 0.5),
+                        Position = UDim2.new(1, -5, 0.5, 0),
+                        Size = UDim2.fromOffset(22, 20),
+                        BackgroundColor3 = mutationBellActive and Theme.accent or Theme.glassPanel,
+                        BackgroundTransparency = mutationBellActive and 0.05 or 0.18,
+                        BorderSizePixel = 0,
+                        Font = Enum.Font.GothamBold,
+                        Text = mutationBellActive and "🔔" or "🔕",
+                        TextColor3 = Theme.text,
+                        TextSize = 11,
+                        AutoButtonColor = true,
+                    }, {
+                        corner(5),
+                        stroke(mutationBellActive and Theme.accent or Theme.line, 1),
+                    })
+                    mutationBell.MouseButton1Click:Connect(function()
+                        webhookOptions.setMutation(mutation, not mutationBellActive)
+                        refresh()
+                    end)
+                    mutationBell.Parent = mutationRow
+                end
+                mutationRow.Parent = mutationsFrame
             end
         end
     end
 
     refresh()
+    if webhookOptions then
+        Maid:add(RunService.Heartbeat:Connect(function()
+            local now = os.clock()
+            if list and list.Parent and UI.isVisible(list) and now - lastWebhookRefresh >= 0.5 then
+                lastWebhookRefresh = now
+                if webhookBellsVisible() ~= lastWebhookVisible then
+                    refresh()
+                end
+            end
+        end))
+    end
     return {
         frame = frame,
         refresh = refresh,
@@ -3093,6 +3199,9 @@ function Feature.saveConfigToWorkspace(reason, quiet)
     end
 
     Config.roll.unitMutationTargets = normalizeUnitMutationTargets(Config.roll.unitMutationTargets)
+    if Feature.normalizeWebhookConfig then
+        Feature.normalizeWebhookConfig()
+    end
 
     local ok, encoded = pcall(function()
         return HttpService:JSONEncode(Feature.getSerializableConfig())
@@ -4074,6 +4183,15 @@ function Feature.autoTraitStep()
         Config.flags.autoTrait = false
         Feature.stopLoop("autoTrait")
         Log.push("Trait matched: " .. unit.name .. " -> " .. unit.trait)
+        Feature.notifyRareWebhook({
+            kind = "Rare Trait Rolled",
+            source = "Trait Reroll",
+            name = unit.name,
+            mutation = unit.mutation,
+            trait = unit.trait,
+            rarity = Feature.getWebhookCharacterRarity(unit.name),
+            id = unit.id,
+        })
         return
     end
 
@@ -4429,17 +4547,572 @@ function Feature.setAutoStartWave(value)
     end
 end
 
+function Feature.fireFastForward(source)
+    if not Feature.isWaveStarted() then
+        return false
+    end
+    if Feature.shouldPauseWaveStartForShenron() then
+        return false
+    end
+
+    local value = tostring(Config.wave.fastForward or "x2")
+    local now = os.clock()
+    local interval = math.max(tonumber(Config.delays.fastForwardPulse) or 10.0, 3.0)
+    if State.lastFastForwardValue == value and now - (State.lastFastForwardAt or 0) < interval then
+        return false
+    end
+
+    State.lastFastForwardAt = now
+    State.lastFastForwardValue = value
+    return Remote.fire("FastForward", value)
+end
+
 function Feature.setAutoFastForward(value)
     Config.flags.autoFastForward = value
     if value then
         Feature.startLoop("autoFastForward", function()
-            return Config.delays.wave
+            return math.max(tonumber(Config.delays.fastForwardPulse) or 10.0, 3.0)
         end, function()
-            Remote.fire("FastForward", Config.wave.fastForward)
+            Feature.fireFastForward("auto")
         end)
     else
         Feature.stopLoop("autoFastForward")
     end
+end
+
+function Feature.isWebhookUrlValid(url)
+    local text = tostring(url or "")
+    return text:match("^https://") ~= nil and text:find("/api/webhooks/", 1, true) ~= nil
+end
+
+function Feature.getWebhookRequestFunction()
+    if type(request) == "function" then
+        return request, "request"
+    end
+
+    local synTable = syn
+    if type(synTable) == "table" and type(synTable.request) == "function" then
+        return synTable.request, "syn.request"
+    end
+
+    if type(http_request) == "function" then
+        return http_request, "http_request"
+    end
+
+    local httpTable = http
+    if type(httpTable) == "table" and type(httpTable.request) == "function" then
+        return httpTable.request, "http.request"
+    end
+
+    return nil, "unavailable"
+end
+
+function Feature.getWebhookExecuteUrl()
+    local url = tostring(Config.webhook.url or "")
+    if not Feature.isWebhookUrlValid(url) then
+        return nil
+    end
+    if url:find("wait=", 1, true) then
+        return url
+    end
+    return url .. (url:find("?", 1, true) and "&wait=true" or "?wait=true")
+end
+
+function Feature.readWebhookRetryAfter(response)
+    if type(response) ~= "table" then
+        return nil
+    end
+
+    local headers = response.Headers or response.headers
+    if type(headers) == "table" then
+        local value = headers["Retry-After"] or headers["retry-after"] or headers["retry_after"]
+        if tonumber(value) then
+            return tonumber(value)
+        end
+    end
+
+    local body = response.Body or response.body
+    if type(body) == "string" and body ~= "" then
+        local ok, decoded = pcall(function()
+            return HttpService:JSONDecode(body)
+        end)
+        if ok and type(decoded) == "table" and tonumber(decoded.retry_after) then
+            return tonumber(decoded.retry_after)
+        end
+    end
+    return nil
+end
+
+function Feature.sendWebhookPayload(payload)
+    State.webhookLastFailureRetry = false
+    local url = Feature.getWebhookExecuteUrl()
+    if not url then
+        State.webhookStatus = "Webhook URL missing or invalid."
+        Log.push(State.webhookStatus)
+        return false
+    end
+
+    local requestFunction, requestName = Feature.getWebhookRequestFunction()
+    if not requestFunction then
+        State.webhookStatus = "No executor HTTP request function available."
+        Log.push(State.webhookStatus)
+        return false
+    end
+
+    local requestPayload = {
+        Url = url,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+        },
+        Body = HttpService:JSONEncode(payload),
+    }
+    local ok, response = pcall(requestFunction, requestPayload)
+    if not ok then
+        State.webhookStatus = "Webhook send failed through " .. tostring(requestName) .. "."
+        Log.push(State.webhookStatus)
+        return false
+    end
+
+    local statusCode = 204
+    if type(response) == "table" then
+        statusCode = tonumber(response.StatusCode or response.status_code or response.Status or response.status) or statusCode
+    end
+    if statusCode == 429 then
+        local retryAfter = math.max(tonumber(Feature.readWebhookRetryAfter(response)) or 5, 1)
+        State.webhookBackoffUntil = os.clock() + retryAfter
+        State.webhookLastFailureRetry = true
+        State.webhookStatus = "Discord rate limited webhook; retrying after " .. tostring(math.ceil(retryAfter)) .. "s."
+        Log.push(State.webhookStatus)
+        return false
+    end
+    if statusCode < 200 or statusCode >= 300 then
+        State.webhookStatus = "Webhook rejected with HTTP " .. tostring(statusCode) .. "."
+        Log.push(State.webhookStatus)
+        return false
+    end
+
+    State.webhookStatus = "Webhook sent through " .. tostring(requestName) .. "."
+    return true
+end
+
+function Feature.webhookTextMatchesAny(text, values)
+    local valueText = tostring(text or "")
+    if valueText == "" then
+        return false
+    end
+    return textMatchesAny(valueText, values or {})
+end
+
+function Feature.webhookTextEqualsAny(text, values)
+    local clean = normalizedLookupKey(text)
+    if clean == "" then
+        return false
+    end
+    for _, value in ipairs(values or {}) do
+        if clean == normalizedLookupKey(value) then
+            return true
+        end
+    end
+    return false
+end
+
+function Feature.getWebhookCharacterRarity(name)
+    local static = Feature.getCharacterStaticInfo(name)
+    return tostring((static and static.rarity) or State.characterRarity[tostring(name or "")] or "")
+end
+
+function Feature.normalizeWebhookConfig()
+    Config.webhook = Config.webhook or {}
+    Config.webhook.superShenronMutationNames = uniqueSorted(Config.webhook.superShenronMutationNames or { "SuperShenron", "Super Shenron" })
+    Config.webhook.superShenronMutationMinRarity = tostring(Config.webhook.superShenronMutationMinRarity or "Secret")
+    if Config.webhook.superShenronMutationMinRarity == "" then
+        Config.webhook.superShenronMutationMinRarity = "Secret"
+    end
+
+    local rareMutations = {}
+    for _, mutation in ipairs(Config.webhook.rareMutations or {}) do
+        if not Feature.webhookTextEqualsAny(mutation, Config.webhook.superShenronMutationNames) then
+            table.insert(rareMutations, tostring(mutation))
+        end
+    end
+    Config.webhook.rareMutations = uniqueSorted(rareMutations)
+    local rareRewards = {}
+    for _, reward in ipairs(Config.webhook.rareRewards or {}) do
+        if not Feature.webhookTextEqualsAny(reward, Config.webhook.superShenronMutationNames) then
+            table.insert(rareRewards, tostring(reward))
+        end
+    end
+    Config.webhook.rareRewards = uniqueSorted(rareRewards)
+    Config.webhook.rollNotifyUnits = uniqueSorted(Config.webhook.rollNotifyUnits or {})
+    Config.webhook.rollNotifyMutations = uniqueSorted(Config.webhook.rollNotifyMutations or {})
+end
+
+function Feature.isWebhookConfiguredForUi()
+    return Config.webhook.enabled == true and Feature.isWebhookUrlValid(Config.webhook.url)
+end
+
+function Feature.webhookListContains(listName, value)
+    Feature.normalizeWebhookConfig()
+    return Feature.webhookTextEqualsAny(value, Config.webhook[listName] or {})
+end
+
+function Feature.setWebhookListValue(listName, value, enabled)
+    Feature.normalizeWebhookConfig()
+    local text = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if text == "" then
+        return false
+    end
+
+    local key = normalizedLookupKey(text)
+    local out = {}
+    for _, item in ipairs(Config.webhook[listName] or {}) do
+        local itemText = tostring(item or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if itemText ~= "" and normalizedLookupKey(itemText) ~= key then
+            table.insert(out, itemText)
+        end
+    end
+    if enabled == true then
+        table.insert(out, text)
+    end
+
+    Config.webhook[listName] = uniqueSorted(out)
+    Feature.scheduleConfigSave("webhook:" .. tostring(listName))
+    return true
+end
+
+function Feature.isWebhookRollUnitNotified(unit)
+    return Feature.webhookListContains("rollNotifyUnits", unit)
+end
+
+function Feature.setWebhookRollUnitNotification(unit, enabled)
+    return Feature.setWebhookListValue("rollNotifyUnits", unit, enabled)
+end
+
+function Feature.isWebhookRollMutationNotified(mutation)
+    return Feature.webhookListContains("rollNotifyMutations", mutation)
+end
+
+function Feature.setWebhookRollMutationNotification(mutation, enabled)
+    return Feature.setWebhookListValue("rollNotifyMutations", mutation, enabled)
+end
+
+function Feature.isWebhookRarityAtLeast(rarity, minimum)
+    local rank = rarityRank(rarity)
+    local minimumRank = rarityRank(minimum or "Secret")
+    if rank >= 999 or minimumRank >= 999 then
+        return false
+    end
+    return rank <= minimumRank
+end
+
+function Feature.isSuperShenronWebhookMutation(mutation)
+    Feature.normalizeWebhookConfig()
+    return Feature.webhookTextEqualsAny(mutation, Config.webhook.superShenronMutationNames)
+end
+
+function Feature.getSuperShenronWebhookReason(mutation, rarity)
+    if not Feature.isSuperShenronWebhookMutation(mutation) then
+        return nil
+    end
+    if Feature.isWebhookRarityAtLeast(rarity, Config.webhook.superShenronMutationMinRarity) then
+        return "rare mutation: " .. tostring(mutation) .. " (" .. tostring(rarity) .. "+)"
+    end
+    return nil
+end
+
+function Feature.isRollWebhookEvent(event)
+    local source = normalizeText(event and event.source)
+    local kind = normalizeText(event and event.kind)
+    return source == "roll"
+        or source == "auto buy"
+        or kind == "rare roll"
+        or kind == "rare roll bought"
+end
+
+function Feature.getRollWatchWebhookReason(event)
+    event = type(event) == "table" and event or {}
+    if not Feature.isRollWebhookEvent(event) then
+        return nil
+    end
+
+    local name = tostring(event.name or event.unit or "")
+    if Feature.isWebhookRollUnitNotified(name) then
+        return "watched roll unit: " .. name
+    end
+
+    local mutation = tostring(event.mutation or "")
+    if Feature.isSuperShenronWebhookMutation(mutation) then
+        local rarity = tostring(event.rarity or Feature.getWebhookCharacterRarity(name))
+        if Feature.isWebhookRarityAtLeast(rarity, Config.webhook.superShenronMutationMinRarity) and Feature.isWebhookRollMutationNotified(mutation) then
+            return "watched roll mutation: " .. mutation .. " (" .. tostring(rarity) .. "+)"
+        end
+        return nil
+    end
+
+    if Feature.isWebhookRollMutationNotified(mutation) then
+        return "watched roll mutation: " .. mutation
+    end
+    return nil
+end
+
+function Feature.describeWebhookPayloadValue(value)
+    if type(value) == "table" then
+        local preferred = value.NotifyText or value.Reward or value.RewardName or value.Name or value.ItemName
+            or value.Trait or value.Mutation or value.Unit or value.Character
+        if preferred ~= nil and tostring(preferred) ~= "" then
+            return tostring(preferred)
+        end
+        local ok, encoded = pcall(function()
+            return HttpService:JSONEncode(value)
+        end)
+        if ok then
+            return tostring(encoded):sub(1, 240)
+        end
+        return "table reward"
+    end
+    return tostring(value or "")
+end
+
+function Feature.getWebhookEventKey(event)
+    event = type(event) == "table" and event or {}
+    return table.concat({
+        tostring(event.kind or ""),
+        tostring(event.name or ""),
+        tostring(event.mutation or ""),
+        tostring(event.trait or ""),
+        tostring(event.reward or ""),
+        tostring(event.slotKey or event.id or ""),
+    }, "|")
+end
+
+function Feature.getRareWebhookReason(event)
+    event = type(event) == "table" and event or {}
+    if event.force == true then
+        return tostring(event.reason or "test")
+    end
+    Feature.normalizeWebhookConfig()
+
+    local trait = tostring(event.trait or event.newTrait or "")
+    if Feature.webhookTextMatchesAny(trait, Config.webhook.rareTraits) then
+        return "rare trait: " .. trait
+    end
+
+    local mutation = tostring(event.mutation or "")
+    local name = tostring(event.name or event.unit or "")
+    local rarity = tostring(event.rarity or Feature.getWebhookCharacterRarity(name))
+    local superShenronReason = Feature.getSuperShenronWebhookReason(mutation, rarity)
+    if superShenronReason then
+        return superShenronReason
+    end
+
+    local rollWatchReason = Feature.getRollWatchWebhookReason(event)
+    if rollWatchReason then
+        return rollWatchReason
+    end
+
+    if Feature.webhookTextMatchesAny(mutation, Config.webhook.rareMutations) then
+        return "rare mutation: " .. mutation
+    end
+
+    if Feature.webhookTextMatchesAny(name, Config.webhook.rareUnits) then
+        return "rare unit: " .. name
+    end
+
+    if Feature.webhookTextMatchesAny(rarity, Config.webhook.rareRarities) then
+        return "rare rarity: " .. rarity
+    end
+
+    local reward = Feature.describeWebhookPayloadValue(event.reward or event.details or event.payload)
+    if Feature.webhookTextMatchesAny(reward, Config.webhook.rareRewards) then
+        return "rare reward: " .. reward
+    end
+
+    return nil
+end
+
+function Feature.shouldNotifyWebhookEvent(event)
+    if type(event) ~= "table" then
+        return false
+    end
+    if not Feature.isWebhookConfiguredForUi() and event.force ~= true then
+        return false
+    end
+    if event.force == true then
+        return true
+    end
+    return Feature.getRareWebhookReason(event) ~= nil
+end
+
+function Feature.buildWebhookEmbed(event)
+    event = type(event) == "table" and event or {}
+    local reason = event.reason or Feature.getRareWebhookReason(event) or "rare event"
+    local title = tostring(event.kind or "Rare Event")
+    local description = tostring(event.description or reason)
+    local fields = {}
+
+    local function addField(name, value, inline)
+        if value ~= nil and tostring(value) ~= "" then
+            table.insert(fields, {
+                name = tostring(name),
+                value = tostring(value):sub(1, 1024),
+                inline = inline == true,
+            })
+        end
+    end
+
+    addField("Unit", event.name or event.unit, true)
+    addField("Mutation", event.mutation, true)
+    addField("Trait", event.trait or event.newTrait, true)
+    addField("Previous Trait", event.previousTrait, true)
+    addField("Rarity", event.rarity or Feature.getWebhookCharacterRarity(event.name), true)
+    addField("Reward", Feature.describeWebhookPayloadValue(event.reward), false)
+    addField("Source", event.source, true)
+    addField("Details", event.details, false)
+
+    local embed = {
+        title = title:sub(1, 256),
+        description = description:sub(1, 2048),
+        color = tonumber(event.color) or 16753920,
+        fields = fields,
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        footer = {
+            text = "SaltHub",
+        },
+    }
+
+    local payload = {
+        username = "SaltHub",
+        embeds = { embed },
+        allowed_mentions = {
+            parse = {},
+        },
+    }
+    if Config.webhook.mentionUser == true then
+        payload.content = "Rare SaltHub event for " .. tostring(LocalPlayer.Name)
+    end
+    return payload
+end
+
+function Feature.sendWebhookEventNow(event)
+    return Feature.sendWebhookPayload(Feature.buildWebhookEmbed(event))
+end
+
+function Feature.queueWebhookEvent(event)
+    if not Feature.shouldNotifyWebhookEvent(event) then
+        return false
+    end
+
+    event.reason = event.reason or Feature.getRareWebhookReason(event)
+    local now = os.clock()
+    local key = Feature.getWebhookEventKey(event)
+    local seenAt = tonumber(State.webhookSeenKeys[key]) or 0
+    if seenAt > 0 and now - seenAt < math.max(tonumber(Config.webhook.dedupeWindow) or 90, 5) then
+        return false
+    end
+
+    State.webhookSeenKeys[key] = now
+    table.insert(State.webhookQueue, event)
+    State.webhookStatus = "Queued webhook: " .. tostring(event.kind or "Rare Event") .. "."
+    return true
+end
+
+function Feature.flushWebhookQueue()
+    if #State.webhookQueue == 0 then
+        return false
+    end
+    local now = os.clock()
+    if now < (tonumber(State.webhookBackoffUntil) or 0) then
+        return false
+    end
+    if now - (tonumber(State.lastWebhookSentAt) or 0) < math.max(tonumber(Config.webhook.minInterval) or 2.5, 0.75) then
+        return false
+    end
+
+    local event = table.remove(State.webhookQueue, 1)
+    if Feature.sendWebhookEventNow(event) then
+        State.lastWebhookSentAt = os.clock()
+        return true
+    end
+    if State.webhookLastFailureRetry == true then
+        table.insert(State.webhookQueue, 1, event)
+    end
+    return false
+end
+
+function Feature.startWebhookLoop()
+    Feature.startLoop("webhook", function()
+        return 0.5
+    end, Feature.flushWebhookQueue)
+end
+
+function Feature.notifyRareWebhook(event)
+    local ok, queued = pcall(function()
+        return Feature.queueWebhookEvent(event)
+    end)
+    if not ok then
+        State.webhookStatus = "Webhook queue failed."
+        Log.push(State.webhookStatus)
+        return false
+    end
+    return queued
+end
+
+function Feature.sendTestWebhook()
+    local ok = Feature.sendWebhookEventNow({
+        kind = "Webhook Test",
+        force = true,
+        reason = "manual test",
+        source = "Webhook tab",
+        details = "SaltHub webhook test from " .. tostring(LocalPlayer.Name) .. ".",
+        color = 5793266,
+    })
+    if ok then
+        State.webhookStatus = "Test webhook sent."
+        Log.push(State.webhookStatus)
+    end
+    return ok
+end
+
+function Feature.describeWebhookStatus()
+    local queueCount = #(State.webhookQueue or {})
+    local enabled = Config.webhook.enabled == true and "Enabled" or "Disabled"
+    local urlStatus = Feature.isWebhookUrlValid(Config.webhook.url) and "URL set" or "URL missing"
+    local backoff = math.max(0, math.ceil((tonumber(State.webhookBackoffUntil) or 0) - os.clock()))
+    local lines = {
+        "State: " .. enabled,
+        "URL: " .. urlStatus,
+        "Queued: " .. tostring(queueCount),
+        "Status: " .. tostring(State.webhookStatus or "-"),
+    }
+    if backoff > 0 then
+        table.insert(lines, "Rate-limit backoff: " .. tostring(backoff) .. "s")
+    end
+    return table.concat(lines, "\n")
+end
+
+function Feature.attachSpinWheelComplete()
+    if State.spinWheelCompleteAttached then
+        return true
+    end
+
+    local remote = Remote.get("SpinWheel")
+    if not remote or not remote:IsA("RemoteEvent") then
+        return false
+    end
+
+    State.spinWheelCompleteAttached = true
+    Maid:add(remote.OnClientEvent:Connect(function(payload)
+        if type(payload) == "table" and payload.Action == "Result" then
+            Feature.notifyRareWebhook({
+                kind = "Rare Spin Reward",
+                source = "Spin Wheel",
+                reward = Feature.describeWebhookPayloadValue(payload),
+                payload = payload,
+            })
+        end
+    end))
+    return true
 end
 
 function Feature.getSpinCount()
@@ -5241,7 +5914,7 @@ function Feature.getRolledCharacters()
         local prompt = rolled.prompt
         local root = rolled.root
         local mutation = Feature.getRolledCharacterMutation(model)
-        table.insert(out, {
+        local entry = {
             name = model.Name,
             mutation = mutation,
             characterId = tostring(model:GetAttribute("CharacterId") or ""),
@@ -5250,6 +5923,16 @@ function Feature.getRolledCharacters()
             model = model,
             root = root,
             prompt = prompt,
+        }
+        table.insert(out, entry)
+        Feature.notifyRareWebhook({
+            kind = "Rare Roll",
+            source = "Roll",
+            name = entry.name,
+            mutation = entry.mutation,
+            rarity = Feature.getWebhookCharacterRarity(entry.name),
+            slotKey = entry.slotKey,
+            details = entry.price,
         })
     end
     State.rolledCharacters = out
@@ -5555,6 +6238,15 @@ function Feature.buyRolledCharacter(entry)
                 bought = true
                 State.lastBuyAt = os.clock()
                 Log.push("Bought " .. tostring(current.name) .. ".")
+                Feature.notifyRareWebhook({
+                    kind = "Rare Roll Bought",
+                    source = "Auto Buy",
+                    name = current.name,
+                    mutation = current.mutation,
+                    rarity = Feature.getWebhookCharacterRarity(current.name),
+                    slotKey = key,
+                    details = current.price,
+                })
                 break
             end
             task.wait(tonumber(Config.delays.buyPromptRetryDelay) or 0.18)
@@ -9946,6 +10638,12 @@ function Feature.attachBoorusSpinComplete()
     Maid:add(remote.OnClientEvent:Connect(function(payload)
         if type(payload) == "table" and payload.Action == "Result" then
             task.delay(math.max(tonumber(Config.boorus.spinCompleteDelay) or 0.65, 0.35), function()
+                Feature.notifyRareWebhook({
+                    kind = "Rare Boorus Reward",
+                    source = "Boorus",
+                    reward = Feature.describeWebhookPayloadValue(payload.NotifyText or payload),
+                    payload = payload,
+                })
                 Remote.fire("BeerusSpin", "Complete", { NotifyText = payload.NotifyText })
                 State.boorusStatus = "Boorus spin reward collected."
                 Log.push(State.boorusStatus)
@@ -9989,7 +10687,7 @@ function Feature.runBoorusFightSupport()
         Feature.autoStartWaveStep()
     end
     if Config.flags.autoFastForward or Config.boorus.autoFastForward ~= false then
-        Remote.fire("FastForward", Config.wave.fastForward)
+        Feature.fireFastForward("boorus")
     end
     return true
 end
@@ -11371,7 +12069,7 @@ function Feature.computeUnitDoombringerTargetStats(unit)
     end
 
     local mutationInfo = Feature.getMutationInfo(unit.mutation)
-    local level = tonumber(unit.level) or 1
+    local level = 1
     local mutationDamage = tonumber(mutationInfo and mutationInfo.DamageMultiplier) or 1
     local baseDamage = Feature.getLevelDamage(info.Damage, level)
     local hitDamage = baseDamage * mutationDamage
@@ -11472,6 +12170,26 @@ function Feature.pickupShenronDoombringerPlacedUnit(unit)
     return Feature.pickupUnitForMerge(unit)
 end
 
+function Feature.stopWaveForShenronDoombringerPrep()
+    if not Feature.isWaveStarted() then
+        return false
+    end
+
+    local now = os.clock()
+    local cooldown = math.max(tonumber(Config.delays.wave) or 1.5, 1.0)
+    if now - (State.lastShenronWaveStopAt or 0) < cooldown then
+        State.shenronStatus = "Doombringer target prep is waiting for the wave to end."
+        return true
+    end
+
+    State.lastShenronWaveStopAt = now
+    State.shenronStatus = "Stopping wave for Doombringer wish prep."
+    Log.push(State.shenronStatus)
+    Remote.fire("EndWave")
+    task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.2))
+    return true
+end
+
 function Feature.pickupShenronDoombringerUnits()
     if Feature.isWaveStarted() then
         State.shenronStatus = "Doombringer target prep is waiting for the wave to end."
@@ -11496,9 +12214,7 @@ function Feature.pickupShenronDoombringerUnits()
 end
 
 function Feature.prepareShenronDoombringerWishTarget()
-    if Feature.isWaveStarted() then
-        State.shenronStatus = "Doombringer target prep is waiting for the wave to end."
-        Log.push(State.shenronStatus)
+    if Feature.stopWaveForShenronDoombringerPrep() then
         return false
     end
 
@@ -11523,7 +12239,15 @@ function Feature.prepareShenronDoombringerWishTarget()
 
     if Feature.equipUnitForMerge(unit) then
         local dpsText = tostring(math.floor((tonumber(candidate.targetDps) or 0) * 10 + 0.5) / 10)
-        State.shenronStatus = "Holding " .. tostring(unit.name) .. " for Doombringer (" .. dpsText .. " mutation DPS)."
+        State.lastShenronDoombringerTarget = {
+            id = unit.id,
+            name = unit.name,
+            mutation = unit.mutation,
+            previousTrait = unit.trait,
+            rarity = Feature.getWebhookCharacterRarity(unit.name),
+            dps = dpsText,
+        }
+        State.shenronStatus = "Holding " .. tostring(unit.name) .. " for Doombringer (" .. dpsText .. " base mutation DPS)."
         Log.push(State.shenronStatus)
         return true
     end
@@ -11712,6 +12436,19 @@ function Feature.turnInShenronDragonBalls()
         end
         Log.push(State.shenronStatus)
         if doombringerWish then
+            local targetEvent = State.lastShenronDoombringerTarget or {}
+            Feature.notifyRareWebhook({
+                kind = "Doombringer Granted",
+                source = "Super Shenron",
+                name = targetEvent.name,
+                mutation = targetEvent.mutation,
+                trait = "Doombringer",
+                previousTrait = targetEvent.previousTrait,
+                rarity = targetEvent.rarity,
+                id = targetEvent.id,
+                details = targetEvent.dps and ("Base mutation DPS: " .. tostring(targetEvent.dps)) or nil,
+            })
+            State.lastShenronDoombringerTarget = nil
             Feature.restoreBestLineupAfterShenronDoombringer()
         end
     else
@@ -11999,6 +12736,9 @@ function Feature.getLaunchScriptUrl()
 end
 
 function Feature.getSerializableConfig()
+    if Feature.normalizeWebhookConfig then
+        Feature.normalizeWebhookConfig()
+    end
     local serialized = Feature.serializeConfigValue(Config)
     serialized.export = serialized.export or {}
     serialized.export.scriptUrl = Feature.getLaunchScriptUrl()
@@ -12139,7 +12879,21 @@ local Tabs = {
                 Config.roll.targetUnits = units
                 Config.roll.unitMutationTargets = mutationTargets
                 Feature.applyAutoRollSettingsLocal()
-            end, 320)
+            end, 320, {
+                enabled = Feature.isWebhookConfiguredForUi,
+                isUnitActive = function(unit)
+                    return Feature.isWebhookRollUnitNotified(unit)
+                end,
+                setUnit = function(unit, enabled)
+                    Feature.setWebhookRollUnitNotification(unit, enabled)
+                end,
+                isMutationActive = function(mutation)
+                    return Feature.isWebhookRollMutationNotified(mutation)
+                end,
+                setMutation = function(mutation, enabled)
+                    Feature.setWebhookRollMutationNotification(mutation, enabled)
+                end,
+            })
 
         end,
     },
@@ -12277,6 +13031,29 @@ local Tabs = {
         end,
     },
     {
+        name = "Webhook",
+        render = function(page)
+            local main = UI.section(page, "Discord Webhook")
+            UI.toggle(main, "Enable Webhook", function()
+                return Config.webhook.enabled == true
+            end, function(value)
+                Config.webhook.enabled = value == true
+                State.webhookStatus = Config.webhook.enabled and "Webhook enabled." or "Webhook disabled."
+            end)
+            UI.toggle(main, "Mention User", function()
+                return Config.webhook.mentionUser == true
+            end, function(value)
+                Config.webhook.mentionUser = value == true
+            end)
+            UI.textBox(main, "Webhook URL", Config.webhook.url, function(text)
+                Config.webhook.url = tostring(text or "")
+                State.webhookStatus = Feature.isWebhookUrlValid(Config.webhook.url) and "Webhook URL set." or "Webhook URL missing or invalid."
+            end)
+            UI.button(main, "Send Test Webhook", Feature.sendTestWebhook, Theme.accent)
+            UI.statusList(main, "Webhook Status", Feature.describeWebhookStatus, 92, 0.75)
+        end,
+    },
+    {
         name = "Settings",
         render = function(page)
             local ui = UI.section(page, "UI Settings")
@@ -12325,6 +13102,9 @@ function SaltHub.Start()
     Feature.startAntiAfkLoop()
     Feature.attachNativeMenuOpenGuard()
     Feature.restoreNativeMenuOptimizerMutations()
+    Feature.startWebhookLoop()
+    Feature.attachSpinWheelComplete()
+    Feature.attachBoorusSpinComplete()
     if Config.flags.optimizeNativeMenus then
         Feature.attachNativeMenuOptimizer()
     end

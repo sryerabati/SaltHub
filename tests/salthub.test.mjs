@@ -35,6 +35,7 @@ test("SaltHub includes all approved feature tabs", () => {
     "Trait",
     "Upgrade",
     "Event",
+    "Webhook",
     "Settings",
   ]) {
     assert.match(source, new RegExp(`name = "${tabName}"`));
@@ -248,6 +249,121 @@ test("auto spin wheel follows the live client remote contract", () => {
   assert.doesNotMatch(spinBody, /Remote\.fire\("SpinWheel"\)/);
   assert.match(toggleBody, /Feature\.startLoop\("autoSpin"[\s\S]*Feature\.spinWheelOnce/);
   assert.doesNotMatch(toggleBody, /Remote\.fire\("SpinWheel"\)/);
+});
+
+test("discord webhook settings have a separate IA surface and test action", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const webhookConfigBody = source.match(/webhook = \{([\s\S]*?)\n    \},\n    trait =/)?.[1] ?? "";
+  const webhookTabBody = source.match(/name = "Webhook",[\s\S]*?render = function\(page\)([\s\S]*?)\n        end,\n    \},\n    \{\n        name = "Settings"/)?.[1] ?? "";
+
+  assert.match(source, /webhook = \{/);
+  assert.match(webhookConfigBody, /enabled = false/);
+  assert.match(webhookConfigBody, /url = ""/);
+  assert.match(webhookConfigBody, /mentionUser = false/);
+  assert.match(webhookConfigBody, /minInterval = 2\.5/);
+  assert.match(webhookConfigBody, /rareTraits = \{ "Omnipotent", "Corrupted", "Doombringer", "Divine Eye", "Divine" \}/);
+  assert.match(webhookConfigBody, /rareMutations = \{ "God", "Divine" \}/);
+  assert.match(webhookConfigBody, /superShenronMutationNames = \{ "SuperShenron", "Super Shenron" \}/);
+  assert.match(webhookConfigBody, /superShenronMutationMinRarity = "Secret"/);
+  assert.match(webhookConfigBody, /rollNotifyUnits = \{\}/);
+  assert.match(webhookConfigBody, /rollNotifyMutations = \{\}/);
+  assert.match(webhookConfigBody, /rareUnits = \{ "Hashirama", "Hashirama \(Sage\)", "Hashiromo" \}/);
+  assert.match(webhookConfigBody, /rareRarities = \{ "Secret" \}/);
+  assert.match(webhookConfigBody, /rareRewards = \{ "Doombringer", "Omnipotent", "Divine", "Divine Eye", "God", "Hashirama", "Hashiromo" \}/);
+  assert.doesNotMatch(webhookConfigBody, /rareRewards = \{[^\n]*Super Shenron/);
+  assert.match(source, /name = "Webhook"/);
+  assert.match(webhookTabBody, /UI\.section\(page, "Discord Webhook"\)/);
+  assert.match(webhookTabBody, /UI\.toggle\(main, "Enable Webhook"/);
+  assert.match(webhookTabBody, /UI\.textBox\(main, "Webhook URL"/);
+  assert.match(webhookTabBody, /UI\.button\(main, "Send Test Webhook", Feature\.sendTestWebhook/);
+  assert.match(webhookTabBody, /UI\.statusList\(main, "Webhook Status"/);
+});
+
+test("roll target selector exposes webhook bell watchlist controls only when webhook is configured", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const selectorSignature = /function UI\.unitMutationSelector\(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height, webhookOptions\)/;
+  const selectorBody = source.match(/function UI\.unitMutationSelector\(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height, webhookOptions\)([\s\S]*?)\nfunction UI\.statusList/)?.[1] ?? "";
+  const rollTabBody = source.match(/name = "Roll",[\s\S]*?render = function\(page\)([\s\S]*?)\n        end,\n    \},\n    \{\n        name = "Merge"/)?.[1] ?? "";
+
+  assert.match(source, selectorSignature);
+  assert.match(selectorBody, /local showWebhookBells = webhookOptions and webhookOptions\.enabled and webhookOptions\.enabled\(\) == true/);
+  assert.match(selectorBody, /Name = "UnitWebhookBell"/);
+  assert.match(selectorBody, /Text = unitBellActive and "🔔" or "🔕"/);
+  assert.match(selectorBody, /Name = "MutationWebhookBell"/);
+  assert.match(selectorBody, /Text = mutationBellActive and "🔔" or "🔕"/);
+  assert.match(selectorBody, /webhookOptions\.setUnit\(unit, not unitBellActive\)/);
+  assert.match(selectorBody, /webhookOptions\.setMutation\(mutation, not mutationBellActive\)/);
+  assert.match(rollTabBody, /UI\.unitMutationSelector\(page, "Target Units"[\s\S]*?Feature\.isWebhookConfiguredForUi/);
+  assert.match(rollTabBody, /Feature\.isWebhookRollUnitNotified\(unit\)/);
+  assert.match(rollTabBody, /Feature\.setWebhookRollUnitNotification\(unit, enabled\)/);
+  assert.match(rollTabBody, /Feature\.isWebhookRollMutationNotified\(mutation\)/);
+  assert.match(rollTabBody, /Feature\.setWebhookRollMutationNotification\(mutation, enabled\)/);
+});
+
+test("discord webhook sender uses executor request fallback and embeds", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const requestBody = source.match(/function Feature\.getWebhookRequestFunction\(\)([\s\S]*?)\nfunction Feature\.sendWebhookPayload/)?.[1] ?? "";
+  const sendBody = source.match(/function Feature\.sendWebhookPayload\(payload\)([\s\S]*?)\nfunction Feature\.buildWebhookEmbed/)?.[1] ?? "";
+  const embedBody = source.match(/function Feature\.buildWebhookEmbed\(event\)([\s\S]*?)\nfunction Feature\.sendWebhookEventNow/)?.[1] ?? "";
+  const queueBody = source.match(/function Feature\.queueWebhookEvent\(event\)([\s\S]*?)\nfunction Feature\.flushWebhookQueue/)?.[1] ?? "";
+  const flushBody = source.match(/function Feature\.flushWebhookQueue\(\)([\s\S]*?)\nfunction Feature\.startWebhookLoop/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.getWebhookRequestFunction/);
+  assert.match(requestBody, /request/);
+  assert.match(requestBody, /http_request/);
+  assert.match(requestBody, /synTable\.request/);
+  assert.match(requestBody, /httpTable\.request/);
+  assert.match(source, /function Feature\.sendWebhookPayload/);
+  assert.match(sendBody, /Method = "POST"/);
+  assert.match(sendBody, /\["Content-Type"\] = "application\/json"/);
+  assert.match(sendBody, /Body = HttpService:JSONEncode\(payload\)/);
+  assert.match(source, /function Feature\.buildWebhookEmbed/);
+  assert.match(embedBody, /embeds = \{/);
+  assert.match(embedBody, /username = "SaltHub"/);
+  assert.match(source, /function Feature\.queueWebhookEvent/);
+  assert.match(queueBody, /State\.webhookSeenKeys/);
+  assert.match(queueBody, /State\.webhookQueue/);
+  assert.match(flushBody, /Config\.webhook\.minInterval/);
+  assert.match(flushBody, /Feature\.sendWebhookEventNow\(event\)/);
+});
+
+test("discord webhook only notifies important rare automation events", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const rareBody = source.match(/function Feature\.getRareWebhookReason\(event\)([\s\S]*?)\nfunction Feature\.shouldNotifyWebhookEvent/)?.[1] ?? "";
+  const shouldBody = source.match(/function Feature\.shouldNotifyWebhookEvent\(event\)([\s\S]*?)\nfunction Feature\.queueWebhookEvent/)?.[1] ?? "";
+  const buyBody = source.match(/function Feature\.buyRolledCharacter\(entry\)([\s\S]*?)\nfunction Feature\.getRollPityEntries/)?.[1] ?? "";
+  const traitBody = source.match(/function Feature\.autoTraitStep\(\)([\s\S]*?)\nfunction Feature\.getPlayerCash/)?.[1] ?? "";
+  const shenronBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
+  const boorusAttachBody = source.match(/function Feature\.attachBoorusSpinComplete\(\)([\s\S]*?)\nfunction Feature\.boorusSpinOnce/)?.[1] ?? "";
+  const spinAttachBody = source.match(/function Feature\.attachSpinWheelComplete\(\)([\s\S]*?)\nfunction Feature\.spinWheelOnce/)?.[1] ?? "";
+
+  assert.match(source, /function Feature\.getRareWebhookReason/);
+  assert.match(rareBody, /Config\.webhook\.rareTraits/);
+  assert.match(rareBody, /Config\.webhook\.rareMutations/);
+  assert.match(rareBody, /Feature\.getSuperShenronWebhookReason\(mutation, rarity\)/);
+  assert.match(source, /function Feature\.isWebhookRarityAtLeast/);
+  assert.match(source, /function Feature\.getSuperShenronWebhookReason/);
+  assert.match(source, /Config\.webhook\.superShenronMutationMinRarity/);
+  assert.match(source, /Config\.webhook\.superShenronMutationNames/);
+  assert.match(source, /Config\.webhook\.rareRewards = uniqueSorted\(rareRewards\)/);
+  assert.match(source, /Feature\.getRollWatchWebhookReason\(event\)/);
+  assert.match(rareBody, /Config\.webhook\.rareUnits/);
+  assert.match(rareBody, /Config\.webhook\.rareRarities/);
+  assert.match(shouldBody, /Feature\.getRareWebhookReason\(event\)/);
+  assert.match(buyBody, /Feature\.notifyRareWebhook\(\{/);
+  assert.match(buyBody, /kind = "Rare Roll Bought"/);
+  assert.match(traitBody, /Feature\.notifyRareWebhook\(\{/);
+  assert.match(traitBody, /kind = "Rare Trait Rolled"/);
+  assert.match(shenronBody, /kind = "Doombringer Granted"/);
+  assert.match(shenronBody, /Feature\.notifyRareWebhook/);
+  assert.match(source, /function Feature\.attachSpinWheelComplete/);
+  assert.match(spinAttachBody, /Remote\.get\("SpinWheel"\)/);
+  assert.match(spinAttachBody, /payload\.Action == "Result"/);
+  assert.match(spinAttachBody, /kind = "Rare Spin Reward"/);
+  assert.match(boorusAttachBody, /kind = "Rare Boorus Reward"/);
+  assert.match(source, /Feature\.startWebhookLoop\(\)/);
+  assert.match(source, /Feature\.attachSpinWheelComplete\(\)/);
+  assert.match(source, /Feature\.attachBoorusSpinComplete\(\)/);
 });
 
 test("auto VIP rewards sync and claim through the ClaimVIP remote", () => {
@@ -469,6 +585,8 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(source, /function Feature\.restoreBestLineupAfterShenronDoombringer/);
   assert.match(targetStatsBody, /Feature\.getCharacterStaticInfo\(unit and unit\.name\)/);
   assert.match(targetStatsBody, /Feature\.getMutationInfo\(unit\.mutation\)/);
+  assert.match(targetStatsBody, /local level = 1/);
+  assert.doesNotMatch(targetStatsBody, /tonumber\(unit\.level\)/);
   assert.match(targetStatsBody, /local mutationDamage = tonumber\(mutationInfo and mutationInfo\.DamageMultiplier\) or 1/);
   assert.match(targetStatsBody, /Feature\.getLevelDamage\(info\.Damage, level\)/);
   assert.match(targetStatsBody, /local hitDamage = baseDamage \* mutationDamage/);
@@ -490,9 +608,9 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(pickupAllBody, /unit\.placed/);
   assert.match(pickupAllBody, /Feature\.pickupShenronDoombringerPlacedUnit\(unit\)/);
   assert.match(pickupAllBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
-  assert.match(prepareBody, /if Feature\.isWaveStarted\(\) then[\s\S]*?return false/);
+  assert.match(prepareBody, /Feature\.stopWaveForShenronDoombringerPrep\(\)/);
   assert.ok(
-    prepareBody.indexOf("if Feature.isWaveStarted() then") < prepareBody.indexOf("Feature.pickupShenronDoombringerUnits()"),
+    prepareBody.indexOf("Feature.stopWaveForShenronDoombringerPrep()") < prepareBody.indexOf("Feature.pickupShenronDoombringerUnits()"),
     "Doombringer prep must wait for the wave to end before picking up placed units",
   );
   assert.match(prepareBody, /Feature\.pickupShenronDoombringerUnits\(\)/);
@@ -503,7 +621,7 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(restoreBody, /Feature\.placeBestLineup\(\)/);
   assert.match(turnInBody, /local doombringerWish = Feature\.isShenronDoombringerWish\(wishName\)/);
   assert.match(turnInBody, /if doombringerWish and not Feature\.prepareShenronDoombringerWishTarget\(\) then/);
-  assert.match(turnInBody, /if doombringerWish then\s+Feature\.restoreBestLineupAfterShenronDoombringer\(\)/);
+  assert.match(turnInBody, /if doombringerWish then[\s\S]*?Feature\.notifyRareWebhook\(\{[\s\S]*?Feature\.restoreBestLineupAfterShenronDoombringer\(\)/);
   assert.ok(
     turnInBody.indexOf("Feature.prepareShenronDoombringerWishTarget()") < turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)'),
     "Doombringer target must be held before ClaimWish fires",
@@ -516,6 +634,24 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
     turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)') < turnInBody.indexOf("Feature.restoreBestLineupAfterShenronDoombringer()"),
     "Best lineup restore must happen only after the Doombringer wish claim succeeds",
   );
+  assert.ok(
+    turnInBody.indexOf("Feature.notifyRareWebhook({") < turnInBody.indexOf("Feature.restoreBestLineupAfterShenronDoombringer()"),
+    "Doombringer webhook should fire before the held unit is restored to the board",
+  );
+});
+
+test("auto Shenron sends EndWave before Doombringer target prep", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const stopBody = source.match(/function Feature\.stopWaveForShenronDoombringerPrep\(\)([\s\S]*?)\nfunction Feature\.pickupShenronDoombringerUnits/)?.[1] ?? "";
+  const prepareBody = source.match(/function Feature\.prepareShenronDoombringerWishTarget\(\)([\s\S]*?)\nfunction Feature\.restoreBestLineupAfterShenronDoombringer/)?.[1] ?? "";
+
+  assert.match(source, /lastShenronWaveStopAt = 0/);
+  assert.match(source, /function Feature\.stopWaveForShenronDoombringerPrep/);
+  assert.match(stopBody, /Feature\.isWaveStarted\(\)/);
+  assert.match(stopBody, /State\.lastShenronWaveStopAt/);
+  assert.match(stopBody, /State\.shenronStatus = "Stopping wave for Doombringer wish prep\."/);
+  assert.match(stopBody, /Remote\.fire\("EndWave"\)/);
+  assert.match(prepareBody, /if Feature\.stopWaveForShenronDoombringerPrep\(\) then[\s\S]*?return false/);
 });
 
 test("auto Shenron uses Luck Potions only for the Super Shenron event", () => {
@@ -808,7 +944,7 @@ test("SaltHub GUI avoids hidden selector rebuild churn", () => {
 test("unit selectors include live search filters for names mutations and traits", () => {
   const source = fs.readFileSync(sourcePath, "utf8");
   const inventoryBody = source.match(/function UI\.inventoryUnitSelector\(parent, title, unitsGetter, selectedIdGetter, setter, height\)([\s\S]*?)\nfunction UI\.traitSelector/)?.[1] ?? "";
-  const unitMutationBody = source.match(/function UI\.unitMutationSelector\(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height\)([\s\S]*?)\nfunction UI\.statusList/)?.[1] ?? "";
+  const unitMutationBody = source.match(/function UI\.unitMutationSelector\(parent, title, unitsGetter, mutationsGetter, selectedUnitsGetter, mutationMapGetter, onChanged, height, webhookOptions\)([\s\S]*?)\nfunction UI\.statusList/)?.[1] ?? "";
 
   assert.match(source, /function UI\.searchBox/);
   assert.match(source, /function UI\.unitSearchText/);
@@ -2452,6 +2588,27 @@ test("auto start wave pauses during Super Shenron Doombringer prep", () => {
     stepBody.indexOf("Feature.shouldPauseWaveStartForShenron()") < stepBody.indexOf("Feature.shouldStartWave()"),
     "Auto Start must yield to Shenron before checking normal wave start conditions",
   );
+});
+
+test("auto fast forward throttles pulses and pauses during Shenron prep", () => {
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const fireBody = source.match(/function Feature\.fireFastForward\(source\)([\s\S]*?)\nfunction Feature\.setAutoFastForward/)?.[1] ?? "";
+  const setBody = source.match(/function Feature\.setAutoFastForward\(value\)([\s\S]*?)\nfunction Feature\.getSpinCount/)?.[1] ?? "";
+  const boorusSupportBody = source.match(/function Feature\.runBoorusFightSupport\(\)([\s\S]*?)\nfunction Feature\.describeBoorusAvailability/)?.[1] ?? "";
+
+  assert.match(source, /fastForwardPulse = 10\.0/);
+  assert.match(source, /lastFastForwardAt = 0/);
+  assert.match(source, /lastFastForwardValue = ""/);
+  assert.match(source, /function Feature\.fireFastForward\(source\)/);
+  assert.match(fireBody, /Feature\.isWaveStarted\(\)/);
+  assert.match(fireBody, /Feature\.shouldPauseWaveStartForShenron\(\)/);
+  assert.match(fireBody, /State\.lastFastForwardAt/);
+  assert.match(fireBody, /State\.lastFastForwardValue/);
+  assert.match(fireBody, /Remote\.fire\("FastForward", value\)/);
+  assert.match(setBody, /return math\.max\(tonumber\(Config\.delays\.fastForwardPulse\) or 10\.0, 3\.0\)/);
+  assert.match(setBody, /Feature\.fireFastForward\("auto"\)/);
+  assert.doesNotMatch(setBody, /Remote\.fire\("FastForward", Config\.wave\.fastForward\)/);
+  assert.match(boorusSupportBody, /Feature\.fireFastForward\("boorus"\)/);
 });
 
 test("auto start wave waits for pending auto buys", () => {
