@@ -239,7 +239,8 @@ local Config = {
     shenron = {
         wishPriority = { "UniqueTrait", "ManyFragments", "MeteorRain", "LuckBoost", "SkipCraftingMachine", "SkipCloningMachine" },
         blockedWishNames = { "MillionDollars", "CashBoost" },
-        doombringerSkipTraits = { "Omnipotent", "Corrupted", "Doombringer" },
+        doombringerSkipTraits = { "Omnipotent", "Doombringer" },
+        doombringerLineupDpsTolerance = 0.10,
         useLuckPotions = true,
         luckPotionName = "Luck Potion",
         luckPotionBoostType = "Luck",
@@ -960,6 +961,7 @@ local State = {
     shenronMeteorCollectUntil = 0,
     lastShenronWishName = "",
     lastShenronDoombringerTarget = nil,
+    shenronDoombringerPlacedTargets = {},
     shenronHoldUntil = 0,
     lastShenronHoldLogAt = 0,
     lastShenronClaimAt = 0,
@@ -12270,8 +12272,100 @@ function Feature.isShenronDoombringerTargetTrait(traitName)
     return true
 end
 
+function Feature.getShenronDoombringerUnitKey(unit)
+    if not unit then
+        return ""
+    end
+    local id = tostring(unit.id or "")
+    if id ~= "" then
+        return "id:" .. id
+    end
+    local familyKey = Feature.mergeFamilyKey(unit)
+    if familyKey ~= "" then
+        return "family:" .. familyKey
+    end
+    return ""
+end
+
+function Feature.captureShenronDoombringerPlacedTargets()
+    local targets = {}
+    for _, unit in ipairs(State.characters or {}) do
+        if unit and unit.placed == true then
+            local key = Feature.getShenronDoombringerUnitKey(unit)
+            if key ~= "" then
+                targets[key] = true
+            end
+        end
+    end
+    State.shenronDoombringerPlacedTargets = targets
+    return targets
+end
+
+function Feature.getShenronDoombringerLineupPriorityMap()
+    local priorityMap = {}
+    for key in pairs(State.shenronDoombringerPlacedTargets or {}) do
+        priorityMap[key] = 1
+    end
+
+    local ok, plan = pcall(Feature.getBestLineupPlanFromEmptyGrid)
+    if ok and type(plan) == "table" then
+        for _, item in ipairs(plan) do
+            local key = Feature.getShenronDoombringerUnitKey(item and item.unit)
+            if key ~= "" then
+                priorityMap[key] = math.max(tonumber(priorityMap[key]) or 0, 2)
+            end
+        end
+    end
+    return priorityMap
+end
+
+function Feature.getShenronDoombringerLineupPriority(unit, priorityMap)
+    local key = Feature.getShenronDoombringerUnitKey(unit)
+    if key == "" then
+        return 0
+    end
+    return tonumber(priorityMap and priorityMap[key]) or 0
+end
+
+function Feature.compareShenronDoombringerCandidates(left, right)
+    local leftDps = tonumber(left and left.targetDps) or 0
+    local rightDps = tonumber(right and right.targetDps) or 0
+    local tolerance = math.max(tonumber(Config.shenron.doombringerLineupDpsTolerance) or 0.10, 0)
+    if leftDps ~= rightDps then
+        local dpsGap = math.abs(leftDps - rightDps) / math.max(math.max(leftDps, rightDps), 1)
+        if dpsGap > tolerance then
+            return leftDps > rightDps
+        end
+    end
+
+    local leftPriority = tonumber(left and left.lineupPriority) or 0
+    local rightPriority = tonumber(right and right.lineupPriority) or 0
+    if leftPriority ~= rightPriority then
+        return leftPriority > rightPriority
+    end
+
+    if leftDps ~= rightDps then
+        return leftDps > rightDps
+    end
+
+    local leftDamage = tonumber(left and left.targetStats and left.targetStats.damage) or 0
+    local rightDamage = tonumber(right and right.targetStats and right.targetStats.damage) or 0
+    if leftDamage ~= rightDamage then
+        return leftDamage > rightDamage
+    end
+
+    local leftLevel = tonumber(left and left.unit and left.unit.level) or 0
+    local rightLevel = tonumber(right and right.unit and right.unit.level) or 0
+    if leftLevel ~= rightLevel then
+        return leftLevel > rightLevel
+    end
+
+    return tostring(left and left.unit and left.unit.name or "") < tostring(right and right.unit and right.unit.name or "")
+end
+
 function Feature.getShenronDoombringerCandidates()
     State.scanUnits()
+    local lineupPriorityMap = Feature.getShenronDoombringerLineupPriorityMap()
     local candidates = {}
     for _, unit in ipairs(State.characters or {}) do
         if unit
@@ -12284,31 +12378,14 @@ function Feature.getShenronDoombringerCandidates()
                     unit = unit,
                     targetStats = targetStats,
                     targetDps = targetStats.dps,
+                    lineupPriority = Feature.getShenronDoombringerLineupPriority(unit, lineupPriorityMap),
                 })
             end
         end
     end
 
     table.sort(candidates, function(left, right)
-        local leftDps = tonumber(left and left.targetDps) or 0
-        local rightDps = tonumber(right and right.targetDps) or 0
-        if leftDps ~= rightDps then
-            return leftDps > rightDps
-        end
-
-        local leftDamage = tonumber(left and left.targetStats and left.targetStats.damage) or 0
-        local rightDamage = tonumber(right and right.targetStats and right.targetStats.damage) or 0
-        if leftDamage ~= rightDamage then
-            return leftDamage > rightDamage
-        end
-
-        local leftLevel = tonumber(left and left.unit and left.unit.level) or 0
-        local rightLevel = tonumber(right and right.unit and right.unit.level) or 0
-        if leftLevel ~= rightLevel then
-            return leftLevel > rightLevel
-        end
-
-        return tostring(left and left.unit and left.unit.name or "") < tostring(right and right.unit and right.unit.name or "")
+        return Feature.compareShenronDoombringerCandidates(left, right)
     end)
     return candidates
 end
@@ -12348,6 +12425,7 @@ function Feature.pickupShenronDoombringerUnits()
     end
 
     State.scanUnits()
+    Feature.captureShenronDoombringerPlacedTargets()
     local picked = 0
     for _, unit in ipairs(State.characters or {}) do
         if unit and unit.placed then
