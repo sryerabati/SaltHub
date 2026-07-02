@@ -4969,14 +4969,19 @@ function Feature.buildWebhookEmbed(event)
         end
     end
 
-    addField("Unit", event.name or event.unit, true)
-    addField("Mutation", event.mutation, true)
-    addField("Trait", event.trait or event.newTrait, true)
-    addField("Previous Trait", event.previousTrait, true)
-    addField("Rarity", event.rarity or Feature.getWebhookCharacterRarity(event.name), true)
-    addField("Reward", Feature.describeWebhookPayloadValue(event.reward), false)
-    addField("Source", event.source, true)
-    addField("Details", event.details, false)
+    if tostring(event.kind or "") == "Doombringer Granted" then
+        addField("Unit", event.name or event.unit, true)
+        addField("DPS After Trait", event.grantedDps or event.afterTraitDps or event.dps, true)
+    else
+        addField("Unit", event.name or event.unit, true)
+        addField("Mutation", event.mutation, true)
+        addField("Trait", event.trait or event.newTrait, true)
+        addField("Previous Trait", event.previousTrait, true)
+        addField("Rarity", event.rarity or Feature.getWebhookCharacterRarity(event.name), true)
+        addField("Reward", Feature.describeWebhookPayloadValue(event.reward), false)
+        addField("Source", event.source, true)
+        addField("Details", event.details, false)
+    end
 
     local embed = {
         title = title:sub(1, 256),
@@ -12118,6 +12123,58 @@ function Feature.getUnitDoombringerTargetDps(unit)
     return tonumber(stats and stats.dps) or 0
 end
 
+function Feature.formatWebhookDps(value)
+    local number = tonumber(value)
+    if not number then
+        return tostring(value or "")
+    end
+
+    local suffixes = {
+        { limit = 1000000000000, suffix = "T" },
+        { limit = 1000000000, suffix = "B" },
+        { limit = 1000000, suffix = "M" },
+        { limit = 1000, suffix = "K" },
+    }
+    for _, item in ipairs(suffixes) do
+        if math.abs(number) >= item.limit then
+            local text = string.format("%.1f", number / item.limit):gsub("%.0$", "")
+            return text .. item.suffix
+        end
+    end
+    return tostring(math.floor(number * 10 + 0.5) / 10)
+end
+
+function Feature.computeUnitDoombringerGrantedStats(unit, fallbackStats)
+    if not unit then
+        return nil
+    end
+
+    local previewUnit = {}
+    for key, value in pairs(unit) do
+        previewUnit[key] = value
+    end
+    previewUnit.level = 1
+    previewUnit.trait = "Doombringer"
+
+    local derived = Feature.computeUnitDerivedStats(previewUnit)
+    local dps = tonumber(derived and derived.dps)
+    if not dps or dps <= 0 then
+        local baseDps = tonumber(fallbackStats and fallbackStats.dps) or Feature.getUnitDoombringerTargetDps(unit)
+        local traitInfo = Feature.getTraitInfo("Doombringer")
+        local traitDamage = tonumber(traitInfo and traitInfo.Damage) or 1
+        local traitCooldown = math.max(tonumber(traitInfo and traitInfo.Cooldown) or 1, 0.05)
+        local critChance = math.max(tonumber(traitInfo and traitInfo.CritChance) or 0, 0)
+        local critDamage = math.max(tonumber(traitInfo and traitInfo.CritDamage) or 1, 1)
+        local critMultiplier = critChance / 100 * (critDamage - 1) + 1
+        dps = baseDps * traitDamage * critMultiplier / traitCooldown
+    end
+
+    return {
+        dps = dps,
+        dpsText = Feature.formatWebhookDps(dps),
+    }
+end
+
 function Feature.isShenronDoombringerTargetTrait(traitName)
     local clean = normalizeText(traitName)
     for _, skipTrait in ipairs(Config.shenron.doombringerSkipTraits or {}) do
@@ -12247,6 +12304,8 @@ function Feature.prepareShenronDoombringerWishTarget()
 
     if Feature.equipUnitForMerge(unit) then
         local dpsText = tostring(math.floor((tonumber(candidate.targetDps) or 0) * 10 + 0.5) / 10)
+        local grantedStats = Feature.computeUnitDoombringerGrantedStats(unit, candidate.targetStats)
+        local grantedDpsText = grantedStats and grantedStats.dpsText or dpsText
         State.lastShenronDoombringerTarget = {
             id = unit.id,
             name = unit.name,
@@ -12254,8 +12313,9 @@ function Feature.prepareShenronDoombringerWishTarget()
             previousTrait = unit.trait,
             rarity = Feature.getWebhookCharacterRarity(unit.name),
             dps = dpsText,
+            grantedDps = grantedDpsText,
         }
-        State.shenronStatus = "Holding " .. tostring(unit.name) .. " for Doombringer (" .. dpsText .. " base mutation DPS)."
+        State.shenronStatus = "Holding " .. tostring(unit.name) .. " for Doombringer (" .. tostring(grantedDpsText) .. " DPS after trait)."
         Log.push(State.shenronStatus)
         return true
     end
@@ -12447,15 +12507,14 @@ function Feature.turnInShenronDragonBalls()
             local targetEvent = State.lastShenronDoombringerTarget or {}
             Feature.notifyRareWebhook({
                 kind = "Doombringer Granted",
-                source = "Super Shenron",
-                description = "Doombringer granted to " .. tostring(targetEvent.name or "selected unit"),
+                description = tostring(targetEvent.name or "selected unit") .. " got Doombringer.",
                 name = targetEvent.name,
                 mutation = targetEvent.mutation,
                 trait = "Doombringer",
                 previousTrait = targetEvent.previousTrait,
                 rarity = targetEvent.rarity,
                 id = targetEvent.id,
-                details = targetEvent.dps and ("Base mutation DPS: " .. tostring(targetEvent.dps)) or nil,
+                grantedDps = targetEvent.grantedDps,
             })
             State.lastShenronDoombringerTarget = nil
             Feature.restoreBestLineupAfterShenronDoombringer()
