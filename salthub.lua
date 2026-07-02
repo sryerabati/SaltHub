@@ -5022,6 +5022,19 @@ function Feature.getRollWebhookDescription(event)
     return table.concat(parts, " | ")
 end
 
+function Feature.getDoombringerWebhookLabel(name, mutation)
+    local unitName = tostring(name or "selected unit")
+    if unitName == "" then
+        unitName = "selected unit"
+    end
+
+    local mutationName = tostring(mutation or "")
+    if mutationName ~= "" and normalizeText(mutationName) ~= "none" then
+        return mutationName .. " " .. unitName, mutationName, unitName
+    end
+    return unitName, nil, unitName
+end
+
 function Feature.buildWebhookEmbed(event)
     event = type(event) == "table" and event or {}
     local reason = event.reason or Feature.getRareWebhookReason(event) or "rare event"
@@ -5043,7 +5056,10 @@ function Feature.buildWebhookEmbed(event)
         title = Feature.getRollWebhookTitle(event)
         description = Feature.getRollWebhookDescription(event) or description
     elseif tostring(event.kind or "") == "Doombringer Granted" then
-        addField("Unit", event.name or event.unit, true)
+        local doombringerLabel, doombringerMutation, doombringerUnit = Feature.getDoombringerWebhookLabel(event.name or event.unit, event.mutation)
+        description = doombringerLabel .. " got Doombringer."
+        addField("Unit", doombringerUnit, true)
+        addField("Mutation", doombringerMutation, true)
         addField("DPS After Trait", event.grantedDps or event.afterTraitDps or event.dps, true)
     elseif Feature.isGuaranteedRewardWebhookEvent(event) then
         description = Feature.describeWebhookPayloadValue(event.reward or event.details or event.payload)
@@ -12574,9 +12590,10 @@ function Feature.turnInShenronDragonBalls()
         Log.push(State.shenronStatus)
         if doombringerWish then
             local targetEvent = State.lastShenronDoombringerTarget or {}
+            local doombringerLabel = Feature.getDoombringerWebhookLabel(targetEvent.name, targetEvent.mutation)
             Feature.notifyRareWebhook({
                 kind = "Doombringer Granted",
-                description = tostring(targetEvent.name or "selected unit") .. " got Doombringer.",
+                description = doombringerLabel .. " got Doombringer.",
                 name = targetEvent.name,
                 mutation = targetEvent.mutation,
                 trait = "Doombringer",

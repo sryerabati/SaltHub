@@ -326,6 +326,7 @@ test("discord webhook sender uses executor request fallback and embeds", () => {
   assert.match(source, /function Feature\.isGuaranteedRewardWebhookEvent/);
   assert.match(source, /function Feature\.getRollWebhookTitle/);
   assert.match(source, /function Feature\.getRollWebhookDescription/);
+  assert.match(source, /function Feature\.getDoombringerWebhookLabel/);
   assert.match(source, /function Feature\.queueWebhookEvent/);
   assert.match(queueBody, /State\.webhookSeenKeys/);
   assert.match(queueBody, /State\.webhookQueue/);
@@ -349,7 +350,7 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(rareBody, /Config\.webhook\.rareTraits/);
   assert.match(rareBody, /if tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?Doombringer granted to/);
   assert.match(embedBody, /if Feature\.isRollWebhookEvent\(event\) then[\s\S]*?title = Feature\.getRollWebhookTitle\(event\)[\s\S]*?description = Feature\.getRollWebhookDescription\(event\) or description[\s\S]*?elseif tostring\(event\.kind or ""\) == "Doombringer Granted"/);
-  assert.match(embedBody, /elseif tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?addField\("Unit", event\.name or event\.unit, true\)[\s\S]*?addField\("DPS After Trait", event\.grantedDps or event\.afterTraitDps or event\.dps, true\)[\s\S]*?else[\s\S]*?addField\("Source", event\.source, true\)/);
+  assert.match(embedBody, /elseif tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?local doombringerLabel, doombringerMutation, doombringerUnit = Feature\.getDoombringerWebhookLabel\(event\.name or event\.unit, event\.mutation\)[\s\S]*?description = doombringerLabel \.\. " got Doombringer\."[\s\S]*?addField\("Unit", doombringerUnit, true\)[\s\S]*?addField\("Mutation", doombringerMutation, true\)[\s\S]*?addField\("DPS After Trait", event\.grantedDps or event\.afterTraitDps or event\.dps, true\)[\s\S]*?else[\s\S]*?addField\("Source", event\.source, true\)/);
   assert.match(embedBody, /elseif Feature\.isGuaranteedRewardWebhookEvent\(event\) then[\s\S]*?description = Feature\.describeWebhookPayloadValue\(event\.reward or event\.details or event\.payload\)[\s\S]*?if description == "" or description == "nil" then[\s\S]*?description = reason/);
   assert.match(rareBody, /Config\.webhook\.rareMutations/);
   assert.match(rareBody, /Feature\.getSuperShenronWebhookReason\(mutation, rarity\)/);
@@ -605,6 +606,7 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(source, /function Feature\.isShenronDoombringerWish/);
   assert.match(source, /function Feature\.computeUnitDoombringerTargetStats/);
   assert.match(source, /function Feature\.computeUnitDoombringerGrantedStats/);
+  assert.match(source, /function Feature\.getDoombringerWebhookLabel/);
   assert.match(source, /function Feature\.getUnitDoombringerTargetDps/);
   assert.match(source, /function Feature\.isShenronDoombringerTargetTrait/);
   assert.match(source, /function Feature\.getShenronDoombringerCandidates/);
@@ -652,7 +654,8 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(turnInBody, /local doombringerWish = Feature\.isShenronDoombringerWish\(wishName\)/);
   assert.match(turnInBody, /if doombringerWish and not Feature\.prepareShenronDoombringerWishTarget\(\) then/);
   assert.match(turnInBody, /if doombringerWish then[\s\S]*?Feature\.notifyRareWebhook\(\{[\s\S]*?Feature\.restoreBestLineupAfterShenronDoombringer\(\)/);
-  assert.match(turnInBody, /description = tostring\(targetEvent\.name or "selected unit"\) \.\. " got Doombringer\."/);
+  assert.match(turnInBody, /local doombringerLabel = Feature\.getDoombringerWebhookLabel\(targetEvent\.name, targetEvent\.mutation\)/);
+  assert.match(turnInBody, /description = doombringerLabel \.\. " got Doombringer\."/);
   assert.match(turnInBody, /name = targetEvent\.name/);
   assert.match(turnInBody, /mutation = targetEvent\.mutation/);
   assert.match(turnInBody, /previousTrait = targetEvent\.previousTrait/);
