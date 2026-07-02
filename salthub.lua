@@ -4893,6 +4893,14 @@ function Feature.getRareWebhookReason(event)
     end
     Feature.normalizeWebhookConfig()
 
+    if tostring(event.kind or "") == "Doombringer Granted" then
+        local grantedName = tostring(event.name or event.unit or "selected unit")
+        if grantedName == "" then
+            grantedName = "selected unit"
+        end
+        return "Doombringer granted to " .. grantedName
+    end
+
     local trait = tostring(event.trait or event.newTrait or "")
     if Feature.webhookTextMatchesAny(trait, Config.webhook.rareTraits) then
         return "rare trait: " .. trait
@@ -12440,6 +12448,7 @@ function Feature.turnInShenronDragonBalls()
             Feature.notifyRareWebhook({
                 kind = "Doombringer Granted",
                 source = "Super Shenron",
+                description = "Doombringer granted to " .. tostring(targetEvent.name or "selected unit"),
                 name = targetEvent.name,
                 mutation = targetEvent.mutation,
                 trait = "Doombringer",

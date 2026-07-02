@@ -339,6 +339,7 @@ test("discord webhook only notifies important rare automation events", () => {
 
   assert.match(source, /function Feature\.getRareWebhookReason/);
   assert.match(rareBody, /Config\.webhook\.rareTraits/);
+  assert.match(rareBody, /if tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?Doombringer granted to/);
   assert.match(rareBody, /Config\.webhook\.rareMutations/);
   assert.match(rareBody, /Feature\.getSuperShenronWebhookReason\(mutation, rarity\)/);
   assert.match(source, /function Feature\.isWebhookRarityAtLeast/);
@@ -622,6 +623,11 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(turnInBody, /local doombringerWish = Feature\.isShenronDoombringerWish\(wishName\)/);
   assert.match(turnInBody, /if doombringerWish and not Feature\.prepareShenronDoombringerWishTarget\(\) then/);
   assert.match(turnInBody, /if doombringerWish then[\s\S]*?Feature\.notifyRareWebhook\(\{[\s\S]*?Feature\.restoreBestLineupAfterShenronDoombringer\(\)/);
+  assert.match(turnInBody, /description = "Doombringer granted to " \.\. tostring\(targetEvent\.name or "selected unit"\)/);
+  assert.match(turnInBody, /name = targetEvent\.name/);
+  assert.match(turnInBody, /mutation = targetEvent\.mutation/);
+  assert.match(turnInBody, /previousTrait = targetEvent\.previousTrait/);
+  assert.match(turnInBody, /details = targetEvent\.dps and \("Base mutation DPS: " \.\. tostring\(targetEvent\.dps\)\) or nil/);
   assert.ok(
     turnInBody.indexOf("Feature.prepareShenronDoombringerWishTarget()") < turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)'),
     "Doombringer target must be held before ClaimWish fires",
@@ -2294,6 +2300,9 @@ test("settings auto save to executor workspace and override launch presets", () 
   assert.match(source, /function Feature\.saveConfigToWorkspace/);
   assert.match(source, /function Feature\.scheduleConfigSave/);
   assert.match(source, /Feature\.scheduleConfigSave\("ui:" \.\. tostring\(text\)\)/);
+  assert.match(source, /Feature\.scheduleConfigSave\("ui:" \.\. tostring\(title\)\)/);
+  assert.match(source, /Feature\.scheduleConfigSave\("webhook:" \.\. tostring\(listName\)\)/);
+  assert.match(source, /if Feature\.normalizeWebhookConfig then\s+Feature\.normalizeWebhookConfig\(\)\s+end/);
   assert.match(source, /Feature\.scheduleConfigSave\("import"\)/);
   assert.match(source, /UI\.button\(ui, "Save Settings Now", Feature\.saveConfigToWorkspace/);
 });
