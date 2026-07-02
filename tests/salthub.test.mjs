@@ -321,6 +321,8 @@ test("discord webhook sender uses executor request fallback and embeds", () => {
   assert.match(embedBody, /embeds = \{/);
   assert.match(embedBody, /username = "SaltHub"/);
   assert.match(source, /function Feature\.isRollWebhookEvent/);
+  assert.equal((source.match(/function Feature\.isRollWebhookEvent/g) ?? []).length, 1);
+  assert.match(source, /function Feature\.isBoughtRollWebhookEvent/);
   assert.match(source, /function Feature\.getRollWebhookTitle/);
   assert.match(source, /function Feature\.getRollWebhookDescription/);
   assert.match(source, /function Feature\.queueWebhookEvent/);
@@ -354,6 +356,13 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(source, /Config\.webhook\.superShenronMutationNames/);
   assert.match(source, /Config\.webhook\.rareRewards = uniqueSorted\(rareRewards\)/);
   assert.match(source, /Feature\.getRollWatchWebhookReason\(event\)/);
+  const rollGateIndex = rareBody.indexOf("if Feature.isRollWebhookEvent(event) then");
+  assert.notEqual(rollGateIndex, -1);
+  assert.ok(rollGateIndex < rareBody.indexOf("Feature.getSuperShenronWebhookReason"));
+  assert.ok(rollGateIndex < rareBody.indexOf("Config.webhook.rareMutations"));
+  assert.ok(rollGateIndex < rareBody.indexOf("Config.webhook.rareUnits"));
+  assert.ok(rollGateIndex < rareBody.indexOf("Config.webhook.rareRarities"));
+  assert.match(rareBody, /if Feature\.isBoughtRollWebhookEvent\(event\) then[\s\S]*?return "bought roll: " \.\. rollName[\s\S]*?return nil/);
   assert.match(rareBody, /Config\.webhook\.rareUnits/);
   assert.match(rareBody, /Config\.webhook\.rareRarities/);
   assert.match(shouldBody, /Feature\.getRareWebhookReason\(event\)/);

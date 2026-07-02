@@ -4830,6 +4830,12 @@ function Feature.isRollWebhookEvent(event)
         or kind == "rare roll bought"
 end
 
+function Feature.isBoughtRollWebhookEvent(event)
+    local source = normalizeText(event and event.source)
+    local kind = normalizeText(event and event.kind)
+    return source == "auto buy" or kind == "rare roll bought"
+end
+
 function Feature.getRollWatchWebhookReason(event)
     event = type(event) == "table" and event or {}
     if not Feature.isRollWebhookEvent(event) then
@@ -4909,14 +4915,22 @@ function Feature.getRareWebhookReason(event)
     local mutation = tostring(event.mutation or "")
     local name = tostring(event.name or event.unit or "")
     local rarity = tostring(event.rarity or Feature.getWebhookCharacterRarity(name))
-    local superShenronReason = Feature.getSuperShenronWebhookReason(mutation, rarity)
-    if superShenronReason then
-        return superShenronReason
-    end
-
     local rollWatchReason = Feature.getRollWatchWebhookReason(event)
     if rollWatchReason then
         return rollWatchReason
+    end
+
+    if Feature.isRollWebhookEvent(event) then
+        if Feature.isBoughtRollWebhookEvent(event) then
+            local rollName = name ~= "" and name or "selected roll"
+            return "bought roll: " .. rollName
+        end
+        return nil
+    end
+
+    local superShenronReason = Feature.getSuperShenronWebhookReason(mutation, rarity)
+    if superShenronReason then
+        return superShenronReason
     end
 
     if Feature.webhookTextMatchesAny(mutation, Config.webhook.rareMutations) then
@@ -4952,14 +4966,9 @@ function Feature.shouldNotifyWebhookEvent(event)
     return Feature.getRareWebhookReason(event) ~= nil
 end
 
-function Feature.isRollWebhookEvent(event)
-    local kind = tostring(type(event) == "table" and event.kind or "")
-    return kind == "Rare Roll" or kind == "Rare Roll Bought"
-end
-
 function Feature.getRollWebhookTitle(event)
     event = type(event) == "table" and event or {}
-    local action = tostring(event.kind or "") == "Rare Roll Bought" and "Bought" or "Rolled"
+    local action = Feature.isBoughtRollWebhookEvent(event) and "Bought" or "Rolled"
     local name = tostring(event.name or event.unit or "")
     if name == "" then
         name = "Unknown"
