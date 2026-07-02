@@ -320,6 +320,9 @@ test("discord webhook sender uses executor request fallback and embeds", () => {
   assert.match(source, /function Feature\.buildWebhookEmbed/);
   assert.match(embedBody, /embeds = \{/);
   assert.match(embedBody, /username = "SaltHub"/);
+  assert.match(source, /function Feature\.isRollWebhookEvent/);
+  assert.match(source, /function Feature\.getRollWebhookTitle/);
+  assert.match(source, /function Feature\.getRollWebhookDescription/);
   assert.match(source, /function Feature\.queueWebhookEvent/);
   assert.match(queueBody, /State\.webhookSeenKeys/);
   assert.match(queueBody, /State\.webhookQueue/);
@@ -341,7 +344,8 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(source, /function Feature\.getRareWebhookReason/);
   assert.match(rareBody, /Config\.webhook\.rareTraits/);
   assert.match(rareBody, /if tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?Doombringer granted to/);
-  assert.match(embedBody, /if tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?addField\("Unit", event\.name or event\.unit, true\)[\s\S]*?addField\("DPS After Trait", event\.grantedDps or event\.afterTraitDps or event\.dps, true\)[\s\S]*?else[\s\S]*?addField\("Source", event\.source, true\)/);
+  assert.match(embedBody, /if Feature\.isRollWebhookEvent\(event\) then[\s\S]*?title = Feature\.getRollWebhookTitle\(event\)[\s\S]*?description = Feature\.getRollWebhookDescription\(event\) or description[\s\S]*?elseif tostring\(event\.kind or ""\) == "Doombringer Granted"/);
+  assert.match(embedBody, /elseif tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?addField\("Unit", event\.name or event\.unit, true\)[\s\S]*?addField\("DPS After Trait", event\.grantedDps or event\.afterTraitDps or event\.dps, true\)[\s\S]*?else[\s\S]*?addField\("Source", event\.source, true\)/);
   assert.match(rareBody, /Config\.webhook\.rareMutations/);
   assert.match(rareBody, /Feature\.getSuperShenronWebhookReason\(mutation, rarity\)/);
   assert.match(source, /function Feature\.isWebhookRarityAtLeast/);

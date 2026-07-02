@@ -4952,6 +4952,45 @@ function Feature.shouldNotifyWebhookEvent(event)
     return Feature.getRareWebhookReason(event) ~= nil
 end
 
+function Feature.isRollWebhookEvent(event)
+    local kind = tostring(type(event) == "table" and event.kind or "")
+    return kind == "Rare Roll" or kind == "Rare Roll Bought"
+end
+
+function Feature.getRollWebhookTitle(event)
+    event = type(event) == "table" and event or {}
+    local action = tostring(event.kind or "") == "Rare Roll Bought" and "Bought" or "Rolled"
+    local name = tostring(event.name or event.unit or "")
+    if name == "" then
+        name = "Unknown"
+    end
+    return action .. " " .. name
+end
+
+function Feature.getRollWebhookDescription(event)
+    event = type(event) == "table" and event or {}
+    local parts = {}
+    local rarity = tostring(event.rarity or Feature.getWebhookCharacterRarity(event.name) or "")
+    if rarity ~= "" then
+        table.insert(parts, rarity)
+    end
+
+    local mutation = tostring(event.mutation or "")
+    if mutation ~= "" and normalizeText(mutation) ~= "none" then
+        table.insert(parts, mutation)
+    end
+
+    local price = Feature.describeWebhookPayloadValue(event.price or event.details or event.reward)
+    if price ~= "" then
+        table.insert(parts, price)
+    end
+
+    if #parts == 0 then
+        return nil
+    end
+    return table.concat(parts, " | ")
+end
+
 function Feature.buildWebhookEmbed(event)
     event = type(event) == "table" and event or {}
     local reason = event.reason or Feature.getRareWebhookReason(event) or "rare event"
@@ -4969,7 +5008,10 @@ function Feature.buildWebhookEmbed(event)
         end
     end
 
-    if tostring(event.kind or "") == "Doombringer Granted" then
+    if Feature.isRollWebhookEvent(event) then
+        title = Feature.getRollWebhookTitle(event)
+        description = Feature.getRollWebhookDescription(event) or description
+    elseif tostring(event.kind or "") == "Doombringer Granted" then
         addField("Unit", event.name or event.unit, true)
         addField("DPS After Trait", event.grantedDps or event.afterTraitDps or event.dps, true)
     else
