@@ -4836,6 +4836,20 @@ function Feature.isBoughtRollWebhookEvent(event)
     return source == "auto buy" or kind == "rare roll bought"
 end
 
+function Feature.isGuaranteedRewardWebhookEvent(event)
+    local source = normalizeText(event and event.source)
+    local kind = normalizeText(event and event.kind)
+    return source == "spin wheel"
+        or source == "boorus"
+        or source == "beerus"
+        or source == "super shenron"
+        or kind == "spin reward"
+        or kind == "rare spin reward"
+        or kind == "boorus reward"
+        or kind == "rare boorus reward"
+        or kind == "super shenron reward"
+end
+
 function Feature.getRollWatchWebhookReason(event)
     event = type(event) == "table" and event or {}
     if not Feature.isRollWebhookEvent(event) then
@@ -4910,6 +4924,14 @@ function Feature.getRareWebhookReason(event)
     local mutation = tostring(event.mutation or "")
     local name = tostring(event.name or event.unit or "")
     local rarity = tostring(event.rarity or Feature.getWebhookCharacterRarity(name))
+    if Feature.isGuaranteedRewardWebhookEvent(event) then
+        local reward = Feature.describeWebhookPayloadValue(event.reward or event.details or event.payload)
+        if reward == "" or reward == "nil" then
+            reward = tostring(event.kind or "reward")
+        end
+        return "reward received: " .. reward
+    end
+
     if Feature.isRollWebhookEvent(event) then
         if not Feature.isBoughtRollWebhookEvent(event) then
             return nil
@@ -5023,6 +5045,11 @@ function Feature.buildWebhookEmbed(event)
     elseif tostring(event.kind or "") == "Doombringer Granted" then
         addField("Unit", event.name or event.unit, true)
         addField("DPS After Trait", event.grantedDps or event.afterTraitDps or event.dps, true)
+    elseif Feature.isGuaranteedRewardWebhookEvent(event) then
+        description = Feature.describeWebhookPayloadValue(event.reward or event.details or event.payload)
+        if description == "" or description == "nil" then
+            description = reason
+        end
     else
         addField("Unit", event.name or event.unit, true)
         addField("Mutation", event.mutation, true)
@@ -5169,7 +5196,7 @@ function Feature.attachSpinWheelComplete()
     Maid:add(remote.OnClientEvent:Connect(function(payload)
         if type(payload) == "table" and payload.Action == "Result" then
             Feature.notifyRareWebhook({
-                kind = "Rare Spin Reward",
+                kind = "Spin Reward",
                 source = "Spin Wheel",
                 reward = Feature.describeWebhookPayloadValue(payload),
                 payload = payload,
@@ -10694,7 +10721,7 @@ function Feature.attachBoorusSpinComplete()
         if type(payload) == "table" and payload.Action == "Result" then
             task.delay(math.max(tonumber(Config.boorus.spinCompleteDelay) or 0.65, 0.35), function()
                 Feature.notifyRareWebhook({
-                    kind = "Rare Boorus Reward",
+                    kind = "Boorus Reward",
                     source = "Boorus",
                     reward = Feature.describeWebhookPayloadValue(payload.NotifyText or payload),
                     payload = payload,
@@ -12560,6 +12587,13 @@ function Feature.turnInShenronDragonBalls()
             })
             State.lastShenronDoombringerTarget = nil
             Feature.restoreBestLineupAfterShenronDoombringer()
+        else
+            Feature.notifyRareWebhook({
+                kind = "Super Shenron Reward",
+                source = "Super Shenron",
+                reward = wishName,
+                details = State.shenronStatus,
+            })
         end
     else
         State.shenronStatus = "Shenron wish claim remote was not available."

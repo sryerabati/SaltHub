@@ -323,6 +323,7 @@ test("discord webhook sender uses executor request fallback and embeds", () => {
   assert.match(source, /function Feature\.isRollWebhookEvent/);
   assert.equal((source.match(/function Feature\.isRollWebhookEvent/g) ?? []).length, 1);
   assert.match(source, /function Feature\.isBoughtRollWebhookEvent/);
+  assert.match(source, /function Feature\.isGuaranteedRewardWebhookEvent/);
   assert.match(source, /function Feature\.getRollWebhookTitle/);
   assert.match(source, /function Feature\.getRollWebhookDescription/);
   assert.match(source, /function Feature\.queueWebhookEvent/);
@@ -349,6 +350,7 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(rareBody, /if tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?Doombringer granted to/);
   assert.match(embedBody, /if Feature\.isRollWebhookEvent\(event\) then[\s\S]*?title = Feature\.getRollWebhookTitle\(event\)[\s\S]*?description = Feature\.getRollWebhookDescription\(event\) or description[\s\S]*?elseif tostring\(event\.kind or ""\) == "Doombringer Granted"/);
   assert.match(embedBody, /elseif tostring\(event\.kind or ""\) == "Doombringer Granted" then[\s\S]*?addField\("Unit", event\.name or event\.unit, true\)[\s\S]*?addField\("DPS After Trait", event\.grantedDps or event\.afterTraitDps or event\.dps, true\)[\s\S]*?else[\s\S]*?addField\("Source", event\.source, true\)/);
+  assert.match(embedBody, /elseif Feature\.isGuaranteedRewardWebhookEvent\(event\) then[\s\S]*?description = Feature\.describeWebhookPayloadValue\(event\.reward or event\.details or event\.payload\)[\s\S]*?if description == "" or description == "nil" then[\s\S]*?description = reason/);
   assert.match(rareBody, /Config\.webhook\.rareMutations/);
   assert.match(rareBody, /Feature\.getSuperShenronWebhookReason\(mutation, rarity\)/);
   assert.match(source, /function Feature\.isWebhookRarityAtLeast/);
@@ -356,6 +358,8 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(source, /Config\.webhook\.superShenronMutationMinRarity/);
   assert.match(source, /Config\.webhook\.superShenronMutationNames/);
   assert.match(source, /Config\.webhook\.rareRewards = uniqueSorted\(rareRewards\)/);
+  assert.match(source, /function Feature\.isGuaranteedRewardWebhookEvent/);
+  assert.match(rareBody, /if Feature\.isGuaranteedRewardWebhookEvent\(event\) then[\s\S]*?return "reward received: " \.\. reward/);
   assert.match(source, /Feature\.getRollWatchWebhookReason\(event\)/);
   const rollGateIndex = rareBody.indexOf("if Feature.isRollWebhookEvent(event) then");
   assert.notEqual(rollGateIndex, -1);
@@ -374,12 +378,15 @@ test("discord webhook only notifies important rare automation events", () => {
   assert.match(traitBody, /Feature\.notifyRareWebhook\(\{/);
   assert.match(traitBody, /kind = "Rare Trait Rolled"/);
   assert.match(shenronBody, /kind = "Doombringer Granted"/);
+  assert.match(shenronBody, /kind = "Super Shenron Reward"/);
+  assert.match(shenronBody, /source = "Super Shenron"/);
+  assert.match(shenronBody, /reward = wishName/);
   assert.match(shenronBody, /Feature\.notifyRareWebhook/);
   assert.match(source, /function Feature\.attachSpinWheelComplete/);
   assert.match(spinAttachBody, /Remote\.get\("SpinWheel"\)/);
   assert.match(spinAttachBody, /payload\.Action == "Result"/);
-  assert.match(spinAttachBody, /kind = "Rare Spin Reward"/);
-  assert.match(boorusAttachBody, /kind = "Rare Boorus Reward"/);
+  assert.match(spinAttachBody, /kind = "Spin Reward"/);
+  assert.match(boorusAttachBody, /kind = "Boorus Reward"/);
   assert.match(source, /Feature\.startWebhookLoop\(\)/);
   assert.match(source, /Feature\.attachSpinWheelComplete\(\)/);
   assert.match(source, /Feature\.attachBoorusSpinComplete\(\)/);
@@ -592,6 +599,7 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   const prepareBody = source.match(/function Feature\.prepareShenronDoombringerWishTarget\(\)([\s\S]*?)\nfunction Feature\.restoreBestLineupAfterShenronDoombringer/)?.[1] ?? "";
   const restoreBody = source.match(/function Feature\.restoreBestLineupAfterShenronDoombringer\(\)([\s\S]*?)\nfunction Feature\.isShenronMeteorWish/)?.[1] ?? "";
   const turnInBody = source.match(/function Feature\.turnInShenronDragonBalls\(\)([\s\S]*?)function Feature\.getAutoShenronLoopDelay/)?.[1] ?? "";
+  const doombringerNotifyBody = turnInBody.match(/if doombringerWish then([\s\S]*?)\n        else/)?.[1] ?? "";
 
   assert.match(source, /doombringerSkipTraits = \{ "Omnipotent", "Corrupted", "Doombringer" \}/);
   assert.match(source, /function Feature\.isShenronDoombringerWish/);
@@ -649,7 +657,7 @@ test("auto Shenron holds the highest mutation-adjusted DPS eligible unit for Doo
   assert.match(turnInBody, /mutation = targetEvent\.mutation/);
   assert.match(turnInBody, /previousTrait = targetEvent\.previousTrait/);
   assert.match(turnInBody, /grantedDps = targetEvent\.grantedDps/);
-  assert.doesNotMatch(turnInBody, /source = "Super Shenron"/);
+  assert.doesNotMatch(doombringerNotifyBody, /source = "Super Shenron"/);
   assert.ok(
     turnInBody.indexOf("Feature.prepareShenronDoombringerWishTarget()") < turnInBody.indexOf('Remote.fire("SuperShenronClaimWish", wishName)'),
     "Doombringer target must be held before ClaimWish fires",
