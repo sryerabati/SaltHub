@@ -701,11 +701,18 @@ test("auto Shenron sends EndWave before Doombringer target prep", () => {
   const prepareBody = source.match(/function Feature\.prepareShenronDoombringerWishTarget\(\)([\s\S]*?)\nfunction Feature\.restoreBestLineupAfterShenronDoombringer/)?.[1] ?? "";
 
   assert.match(source, /lastShenronWaveStopAt = 0/);
+  assert.match(source, /function Feature\.getWaveStopButton/);
+  assert.match(source, /function Feature\.requestWaveStop/);
   assert.match(source, /function Feature\.stopWaveForShenronDoombringerPrep/);
   assert.match(stopBody, /Feature\.isWaveStarted\(\)/);
   assert.match(stopBody, /State\.lastShenronWaveStopAt/);
   assert.match(stopBody, /State\.shenronStatus = "Stopping wave for Doombringer wish prep\."/);
-  assert.match(stopBody, /Remote\.fire\("EndWave"\)/);
+  assert.match(stopBody, /Feature\.requestWaveStop\(\)/);
+  const requestStopBody = source.match(/function Feature\.requestWaveStop\(\)([\s\S]*?)\nfunction Feature\.stopWaveForShenronDoombringerPrep/)?.[1] ?? "";
+  assert.match(requestStopBody, /Remote\.fire\("EndWave"\)/);
+  assert.match(requestStopBody, /local stopButton = Feature\.getWaveStopButton\(\)/);
+  assert.match(requestStopBody, /firesignal\(stopButton\.MouseButton1Click\)/);
+  assert.match(requestStopBody, /VirtualInputManager:SendMouseButtonEvent/);
   assert.match(prepareBody, /if Feature\.stopWaveForShenronDoombringerPrep\(\) then[\s\S]*?return false/);
 });
 

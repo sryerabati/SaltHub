@@ -4389,15 +4389,27 @@ function Feature.getWaveUiStartRoot()
     return uiTop and uiTop:FindFirstChild("Start")
 end
 
+function Feature.getWaveStopButton()
+    local startRoot = Feature.getWaveUiStartRoot()
+    local startButton = startRoot and startRoot:FindFirstChild("Start")
+    if not startButton or not (startButton:IsA("TextButton") or startButton:IsA("ImageButton")) then
+        return nil
+    end
+
+    local label = startButton:FindFirstChild("TextLabel", true)
+    if label and label:IsA("TextLabel") and textMatchesAny(label.Text, { "Stop" }) then
+        return startButton
+    end
+    return nil
+end
+
 function Feature.isWaveUiStarted()
     local startRoot = Feature.getWaveUiStartRoot()
     if not startRoot then
         return false
     end
 
-    local startButton = startRoot:FindFirstChild("Start")
-    local label = startButton and startButton:FindFirstChild("TextLabel", true)
-    if label and label:IsA("TextLabel") and textMatchesAny(label.Text, { "Stop" }) then
+    if Feature.getWaveStopButton() then
         return true
     end
 
@@ -12402,6 +12414,39 @@ function Feature.pickupShenronDoombringerPlacedUnit(unit)
     return Feature.pickupUnitForMerge(unit)
 end
 
+function Feature.requestWaveStop()
+    local stopButton = Feature.getWaveStopButton()
+    if not stopButton then
+        return Remote.fire("EndWave")
+    end
+
+    local clicked = false
+    if type(firesignal) == "function" then
+        local ok = pcall(function()
+            firesignal(stopButton.MouseButton1Click)
+        end)
+        clicked = ok == true
+    end
+
+    if not clicked then
+        local ok = pcall(function()
+            local position = stopButton.AbsolutePosition
+            local size = stopButton.AbsoluteSize
+            local x = position.X + (size.X / 2)
+            local y = position.Y + (size.Y / 2)
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+        clicked = ok == true
+    end
+
+    if clicked then
+        return true
+    end
+    return Remote.fire("EndWave")
+end
+
 function Feature.stopWaveForShenronDoombringerPrep()
     if not Feature.isWaveStarted() then
         return false
@@ -12417,7 +12462,7 @@ function Feature.stopWaveForShenronDoombringerPrep()
     State.lastShenronWaveStopAt = now
     State.shenronStatus = "Stopping wave for Doombringer wish prep."
     Log.push(State.shenronStatus)
-    Remote.fire("EndWave")
+    Feature.requestWaveStop()
     task.wait(math.max(tonumber(Config.safety.remoteCooldown) or 0.35, 0.2))
     return true
 end
